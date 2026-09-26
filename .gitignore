@@ -1,0 +1,7 @@
+build/
+.vscode/
+*.hex
+*.elf
+*.map
+.DS_Store
+Thumbs.db
