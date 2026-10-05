@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible firmware, audio, DSP, UI, or hardware-integration problem
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Complete logs and exact audio-file properties make embedded-audio issues much easier to reproduce.
+  - type: input
+    id: commit
+    attributes:
+      label: Firmware commit
+      placeholder: e.g. a9458f5
+    validations:
+      required: true
+  - type: input
+    id: core
+    attributes:
+      label: ESP32 Arduino core version
+      placeholder: e.g. 3.3.12
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: Board, DAC, SD card, displays and any amplifier.
+    validations:
+      required: true
+  - type: textarea
+    id: audio
+    attributes:
+      label: Test FLAC
+      description: Sample rate, bit depth, channels, and whether it is in root or a subfolder.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Full compiler or Serial Monitor output
+      render: text
+  - type: checkboxes
+    id: modes
+    attributes:
+      label: Runtime state
+      options:
+        - label: FX enabled
+        - label: Visualizer enabled
+        - label: Problem occurs with FX bypassed too
