@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="420" viewBox="0 0 1400 420" role="img" aria-label="ESP32-S3 DJ Audio Console">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#101b33"/>
+      <stop offset="1" stop-color="#251247"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#20e3b2"/>
+      <stop offset="0.5" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1400" height="420" rx="28" fill="url(#bg)"/>
+  <g opacity=".18" stroke="#93c5fd">
+    <path d="M0 335 C160 300 250 380 410 332 S720 290 860 332 1150 385 1400 320" fill="none" stroke-width="2"/>
+    <path d="M0 355 C180 320 260 400 430 350 S720 310 900 352 1160 405 1400 342" fill="none" stroke-width="1"/>
+  </g>
+  <g transform="translate(920 70)" fill="none" stroke="url(#accent)" stroke-width="8" stroke-linecap="round">
+    <rect x="0" y="0" width="340" height="250" rx="28" opacity=".78"/>
+    <circle cx="92" cy="82" r="44"/>
+    <circle cx="248" cy="82" r="44"/>
+    <path d="M45 176 H295"/>
+    <path d="M70 210 H270"/>
+    <g stroke-width="12" filter="url(#glow)">
+      <path d="M50 176 v-34"/>
+      <path d="M82 176 v-62"/>
+      <path d="M114 176 v-26"/>
+      <path d="M146 176 v-84"/>
+      <path d="M178 176 v-48"/>
+      <path d="M210 176 v-96"/>
+      <path d="M242 176 v-56"/>
+      <path d="M274 176 v-75"/>
+    </g>
+  </g>
+  <text x="92" y="120" fill="#f8fafc" font-family="Segoe UI,Inter,Arial,sans-serif" font-size="30" font-weight="700" letter-spacing="4">ESP32-S3 • LOSSLESS • REAL-TIME DSP</text>
+  <text x="88" y="205" fill="#ffffff" font-family="Segoe UI,Inter,Arial,sans-serif" font-size="64" font-weight="800">DJ Audio Console</text>
+  <rect x="90" y="235" width="665" height="6" rx="3" fill="url(#accent)"/>
+  <text x="92" y="292" fill="#cbd5e1" font-family="Segoe UI,Inter,Arial,sans-serif" font-size="28">A standalone FLAC player, effects engine & embedded workstation</text>
+  <text x="92" y="340" fill="#7dd3fc" font-family="Consolas,Menlo,monospace" font-size="22">FLAC → PCM DSP → I2S DAC • ST7789 + SH1106 • Hardware controls</text>
+</svg>
