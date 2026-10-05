@@ -1,16 +1,49 @@
 # ESP32-S3 DJ Audio Console / DAW
 
-![Status](https://img.shields.io/badge/status-active%20development-orange)
-![Target](https://img.shields.io/badge/target-ESP32--S3-blue)
-![Audio](https://img.shields.io/badge/audio-FLAC%20%2B%20I2S-brightgreen)
-![DSP](https://img.shields.io/badge/DSP-realtime-purple)
-![UI](https://img.shields.io/badge/UI-ST7789%20%2B%20SH1106-cyan)
+<p align="center">
+  <img src="assets/banner.svg" alt="ESP32-S3 DJ Audio Console banner" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/anksax/DAW/actions/workflows/ci.yml"><img alt="Firmware CI" src="https://github.com/anksax/DAW/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+  <img alt="ESP32-S3" src="https://img.shields.io/badge/MCU-ESP32--S3-000000?logo=espressif&logoColor=white">
+  <img alt="FLAC" src="https://img.shields.io/badge/Audio-FLAC-7C3AED">
+  <img alt="AudioTools" src="https://img.shields.io/badge/AudioTools-realtime%20DSP-0EA5E9">
+  <img alt="Status" src="https://img.shields.io/badge/status-active%20development-F59E0B">
+</p>
+
+<p align="center">
+  <b>Standalone lossless playback • hardware controls • real-time DSP • dual-display UI • real PCM visualization</b>
+</p>
+
 
 A compact, standalone digital audio workstation / DJ-style audio console built around an **ESP32-S3-WROOM-1 N16R8**.
 
 The project combines local lossless playback, physical controls, two displays, a real-time PCM DSP chain, a real audio-reactive spectrum visualizer, and an external I2S DAC in one self-contained embedded system.
 
 > **Project state:** active development. The current priority is making the audio path, DSP, visualizer and UI completely stable before expanding into MIDI, recording and broader workstation features.
+
+
+## Why this project
+
+Most ESP32 audio projects stop at basic playback. This project explores how far a single embedded system can be pushed toward a **real tactile music workstation**: lossless local audio, dedicated controls, responsive UI, real-time effects, and visual feedback without depending on a phone or PC.
+
+## The three pillars
+
+| What | Why | How |
+|---|---|---|
+| A standalone ESP32-S3 DJ/audio workstation | To combine lossless playback, physical interaction and DSP in one compact embedded platform | FLAC from microSD → Foxen decoder → PCM DSP → I2S DAC, with controls and dual displays |
+
+## Quick start
+
+1. Use an **ESP32S3 Dev Module** with **16 MB flash** and **OPI PSRAM**.
+2. Install the libraries listed in [Software stack](#software-stack).
+3. Apply the documented [Arduino board settings](#recommended-arduino-board-settings).
+4. Put 16-bit mono/stereo `.flac` files on the microSD card.
+5. Compile and upload `DJ_Audio_Console_V4.ino`.
+6. Open Serial Monitor at **115200 baud** and verify SD, FLAC, I2S and DSP startup logs.
+
 
 ---
 
@@ -460,6 +493,20 @@ DAW/
 ~~~
 
 ---
+
+
+## Contributing & community
+
+Contributions are welcome, especially around audio stability, DSP efficiency, visualizer accuracy, metadata, testing and hardware integration.
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Hardware documentation](docs/HARDWARE.md)
+- [Development roadmap](docs/DEVELOPMENT.md)
+- [Troubleshooting guide](docs/TROUBLESHOOTING.md)
+- [MIT License](LICENSE)
+
+Pull requests use a hardware/audio validation checklist, and issues include dedicated bug and feature templates.
 
 ## Author
 
