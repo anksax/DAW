@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a new audio, DSP, UI, control-surface, or workstation feature
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What should the project make easier or possible?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Audio playback
+        - DSP / effects
+        - Visualizer
+        - UI / UX
+        - Hardware
+        - MIDI
+        - Recording / sampling
+        - Build / CI
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: realtime
+    attributes:
+      label: Real-time impact
+      description: If this adds CPU, memory, SPI, or latency cost, describe it.
