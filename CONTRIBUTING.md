@@ -22,7 +22,7 @@ Recommended baseline:
 - OPI PSRAM enabled
 - 16 MB flash
 - 240 MHz CPU
-- Serial Monitor at 115200 baud
+- Serial diagnostics disabled by default; opt in for captures at 115200 baud
 
 Required libraries:
 
@@ -38,7 +38,7 @@ Required libraries:
 2. Install the ESP32 Arduino core and libraries above.
 3. Select **ESP32S3 Dev Module**.
 4. Apply the board configuration documented in `README.md`.
-5. Compile `DJ_Audio_Console_V4.ino`.
+5. Compile `DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino`; keep both local headers beside it.
 6. Test on hardware with a known-good 16-bit mono/stereo FLAC.
 
 ## What to test
@@ -107,3 +107,6 @@ Feature ideas are welcome, but audio stability has priority over adding more DSP
 ## License
 
 By contributing, you agree that your contributions will be licensed under the repository's MIT License.
+
+
+Run `bash validation/run_checks.sh` before submitting firmware changes. It regenerates the DSP/control host checks from the current sketch and runs address/undefined-behavior sanitizers. These use platform stubs and cannot replace the Arduino build or a board listening test. Record USB monitor-close behavior and standalone-power results; the disconnect distortion remains open.

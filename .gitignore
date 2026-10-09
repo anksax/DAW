@@ -5,3 +5,10 @@ build/
 *.map
 .DS_Store
 Thumbs.db
+
+# Native validation binaries and generated intermediate
+validation/host_checks_v6
+validation/metadata_checks_v6
+validation/serial_checks_v6
+validation/_host_checks_base.cpp
+*.bin

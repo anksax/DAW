@@ -1,0 +1,2 @@
+# CLI defaults, not an Arduino IDE preferences repair.
+default_fqbn: esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,FlashMode=qio,PartitionScheme=app3M_fat9M_16MB,UploadSpeed=921600,USBMode=hwcdc,CDCOnBoot=cdc

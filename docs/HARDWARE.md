@@ -58,6 +58,7 @@ The current firmware uses:
 | Encoder 2 | SW | 47 |
 | Joystick | X | 1 |
 | Joystick | Y | 2 |
+| Joystick | SW | 18 |
 | Volume fader | analog | 7 |
 
 ## Shared SPI bus
@@ -107,14 +108,14 @@ SH1106:
 - DT: GPIO 42
 - switch: GPIO 38
 
-Used for FX selection, parameter changes and visualizer mode.
+Click selects FX, rotation changes strength (0–25), hold toggles the selected effect.
 
 ### Encoder 2
 - CLK: GPIO 39
 - DT: GPIO 40
 - switch: GPIO 47
 
-Used for wet/dry mix, play/pause and FX bypass.
+Click toggles shuffle; hold switches OLED FX/spectrum; rotation is unassigned.
 
 ### Joystick
 - X: GPIO 1
@@ -177,3 +178,6 @@ Before debugging software, verify:
 ## Current hardware scope
 
 The present hardware is intentionally a single-deck embedded audio workstation. Multi-deck audio, recording inputs, MIDI hardware, balanced outputs and custom PCB integration are future expansion areas.
+
+
+V6 main-screen settings use joystick hold to enter/exit and joystick axes to select/adjust brightness and bass/mid/treble EQ. Joystick click exits settings or plays/pauses outside settings. TFT BL GPIO 21 must be connected to a controllable backlight input; a supply-tied BL cannot dim in software. Brightness also controls OLED contrast. See the README for the complete mapping and NVS save behavior.

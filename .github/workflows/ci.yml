@@ -11,39 +11,35 @@ permissions:
   contents: read
 
 jobs:
-  compile:
-    name: Compile ESP32-S3 firmware
+  host-checks:
+    name: Native DSP, control, metadata and logging checks
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Run regenerated host API models with sanitizers
+        run: bash validation/run_checks.sh
 
-      - name: Install Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
-
-      - name: Configure ESP32 package index
+  compile:
+    name: Compile V6 for ESP32-S3 N16R8
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install Arduino-ESP32 3.3.12
         run: |
           arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
-
-      - name: Install Arduino libraries
+          arduino-cli core install esp32:esp32@3.3.12
+      - name: Install display libraries and pinned audio libraries
         run: |
           arduino-cli lib update-index
-          arduino-cli lib install "Adafruit GFX Library"
-          arduino-cli lib install "Adafruit ST7735 and ST7789 Library"
-          arduino-cli lib install "U8g2"
+          arduino-cli lib install "Adafruit GFX Library" "Adafruit ST7735 and ST7789 Library" "U8g2"
           mkdir -p "$HOME/Arduino/libraries"
-          git clone --depth 1 https://github.com/pschatzmann/arduino-audio-tools.git "$HOME/Arduino/libraries/audio-tools"
-          git clone --depth 1 https://github.com/pschatzmann/codec-libfoxenflac.git "$HOME/Arduino/libraries/codec-libfoxenflac"
-
-      - name: Prepare Arduino sketch directory
+          git clone https://github.com/pschatzmann/arduino-audio-tools.git "$HOME/Arduino/libraries/audio-tools"
+          git -C "$HOME/Arduino/libraries/audio-tools" checkout 630fa74ddec7f5ca9ede19b5b43a394c20b02229
+          git clone https://github.com/pschatzmann/codec-libfoxenflac.git "$HOME/Arduino/libraries/codec-libfoxenflac"
+          git -C "$HOME/Arduino/libraries/codec-libfoxenflac" checkout 79042f31e1e35e91c6dacbe1fdcb69e71a152cb1
+      - name: Compile current sketch with its local headers
         run: |
-          mkdir -p build-sketch/DJ_Audio_Console_V4
-          cp DJ_Audio_Console_V4.ino build-sketch/DJ_Audio_Console_V4/DJ_Audio_Console_V4.ino
-
-      - name: Compile for ESP32-S3
-        run: |
-          arduino-cli compile             --fqbn esp32:esp32:esp32s3             --warnings all             build-sketch/DJ_Audio_Console_V4
+          arduino-cli compile --fqbn "$(cat board-fqbn.txt)" --warnings all DJ_Audio_Console_V6
