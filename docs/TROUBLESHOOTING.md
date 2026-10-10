@@ -1,3 +1,31 @@
+# V6 troubleshooting updates
+
+## Distortion after closing Serial Monitor / IDE (open issue)
+
+The user still reports this after disabling firmware and AudioTools serial diagnostics. The logging mitigation has not fixed the observed event. Do not assume a USB reset or firmware underrun without evidence.
+
+1. Verify upload completed successfully and settings show V6 20261010 LOG:OFF. Sketch/headers compile into one firmware image, not separate ESP32 files. A failed compile/upload can leave an old build running. DAW_SERIAL_DIAGNOSTICS defaults to 0 in SerialDiagnostics.h.
+2. Play the same file with FX disabled, then compare monitor-close behavior with standalone power from a USB wall charger.
+3. Note whether the UI shows the boot screen/stops playback or remains responsive while audio corrupts.
+4. Record which USB socket is used (native USB versus USB-to-UART), and the power/DAC ground arrangement.
+5. For a capture, enable diagnostics and rebuild, save the complete boot/performance log, then turn diagnostics off again. A reconnect may itself reset the board, so it cannot prove when the earlier reset occurred.
+
+## Compiler / Windows setup
+
+Keep both FlacTags.h and SerialDiagnostics.h beside the V6 .ino. Extract the ZIP before opening. For “bootloader.bin was unexpected at this time”, try C:\Arduino\DJ_Audio_Console_V6 and collect verbose compile output if it persists. AudioTools headers must precede the first function so Arduino-generated prototypes can see AudioInfo. The unsigned ramp arithmetic avoids max() deduction conflicts on ESP32. “Multiple libraries found for SD.h” is informational if the ESP32 core SD library is selected.
+
+## Brightness and joystick
+
+Use joystick hold to open settings, up/down to select a row and left/right to adjust; return to neutral after each step. Keep the stick neutral at startup. Enable diagnostics for [JOY] raw/center values and [BACKLIGHT] attach/write status. Brightness controls PWM on GPIO 21 and OLED contrast; physical TFT BL wiring is required.
+
+## Speed and FX
+
+With SLOW off, the decoder and physical I2S rates should match. SLOW deliberately changes speed and pitch; edits apply after 250 ms without adjustment and an individual transition may still be audible. Up to three PCM stages plus SLOW are allowed. Vocoder output is intentionally softer; listening validation remains pending.
+
+---
+
+## Earlier general troubleshooting
+
 # Troubleshooting
 
 ## Serial monitor
@@ -24,7 +52,7 @@ The scanner supports subfolders.
 
 This usually indicates a sample-rate mismatch.
 
-Check Serial output for:
+With opt-in diagnostics enabled, check Serial output for:
 - FLAC format sample rate
 - I2S sample rate
 
