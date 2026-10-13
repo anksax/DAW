@@ -12,13 +12,13 @@
   ENC1 click  : next effect
   ENC1 long   : selected effect ON/OFF
   ENC2 rotate : browse music library
-  ENC2 click  : shuffle / sequential
-  ENC2 long   : toggle FX / spectrum
+  ENC2 click  : play selected song
+  ENC2 long   : shuffle / sequential
   JOY up/down : select track
   JOY right   : play selected
   JOY left    : previous track
   JOY press   : play / pause (starts selected track when stopped)
-  JOY hold    : main screen settings; joystick axes select/adjust
+  JOY hold    : EQ / OLED settings; joystick axes select/adjust
   FADER       : master volume
 
   Supported files in this build: FLAC
@@ -344,6 +344,7 @@ enum FXMode {
   FX_FLANGER,
   FX_VOCODER,
   FX_RINGMOD,
+  FX_REVERB, // Append: preserve all previously stored IDs.
   FX_COUNT
 };
 
@@ -360,32 +361,21 @@ const char *fxNames[] = {
   "PHASER",
   "FLANGER",
   "VOCODER",
-  "RING MOD"
+  "RING MOD",
+  "REVERB"
 };
 static_assert(FX_COUNT <= 16, "FX mask storage is 16 bits");
 
-const uint8_t fxCharacterPreset[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12, 10};
-uint8_t storedParam[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12, 10};
-uint8_t storedMix[FX_COUNT] = {18, 18, 18, 18, 18, 18, 18, 18, 0, 18, 18, 25, 18};
+const uint8_t fxCharacterPreset[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12, 10, 14};
+uint8_t storedParam[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12, 10, 14};
+uint8_t storedMix[FX_COUNT] = {18, 18, 18, 18, 18, 18, 18, 18, 0, 18, 18, 25, 18, 12};
 uint16_t enabledFXMask = 0;
 int8_t eqDB[3] = {};
 int oledPage = 0; // FX or spectrum only
 bool mainSettingsOpen = false, mainFrameDirty = false, mainSettingsDirty = true;
 bool mainSettingsLayoutDirty = true;
-int selectedSetting = 0; // TFT brightness, bass, mid, treble
-uint8_t screenBrightness = 18;
-bool backlightReady = false;
-uint32_t brightnessDuty(uint8_t level) {
-  uint32_t value = (uint32_t)constrain((int)level, 1, 25);
-  return 4 + (value * value * 251 + 312) / 625;
-}
-void applyScreenBrightness() {
-  uint32_t duty = brightnessDuty(screenBrightness);
-  bool written = backlightReady && ledcWrite(TFT_BL, duty);
-  oled.setContrast((uint8_t)(16 + (constrain((int)screenBrightness, 1, 25) - 1) * 239 / 24));
-  DAW_LOG.printf("[BACKLIGHT] pin=%d level=%u duty=%u attached=%d write=%d\n",
-    TFT_BL, (unsigned)screenBrightness, (unsigned)duty, backlightReady, written);
-}
+static constexpr int MAIN_SETTING_COUNT = 4;
+int selectedSetting = 0; // bass, mid, treble, OLED view
 void toggleMainSettings() {
   mainSettingsOpen = !mainSettingsOpen;
   mainFrameDirty = true; mainSettingsDirty = true; mainSettingsLayoutDirty = true;
@@ -488,6 +478,12 @@ public:
         instance->eqLowAlpha = (int32_t)(32768.0f * (2 * PI * 200) / (sr + 2 * PI * 200));
         instance->eqHighAlpha = (int32_t)(32768.0f * (2 * PI * 4000) / (sr + 2 * PI * 4000));
         for (int i = 0; i < 3; ++i) instance->eqGain[i] = (int32_t)(32768.0f * powf(10.0f, gains[i] / 20.0f));
+        // Compensate positive EQ boosts with preamp attenuation instead of
+        // multiplying already full-scale PCM and hard-clipping the result.
+        int32_t peakGain = 32768;
+        for (int i = 0; i < 3; ++i) peakGain = max(peakGain, instance->eqGain[i]);
+        if (peakGain > 32768) for (int i = 0; i < 3; ++i)
+          instance->eqGain[i] = (int32_t)((int64_t)instance->eqGain[i] * 32768 / peakGain);
         instance->localRevision = revision;
         instance->refreshStageList();
       }
@@ -500,6 +496,7 @@ public:
   }
 
   ~DJFXEffect() {
+    if (reverbBuffer) free(reverbBuffer);
     if (flangerBuffer) free(flangerBuffer);
     if (chorusBuffer) free(chorusBuffer);
     for (auto &instance : instances) if (instance == this) instance = nullptr;
@@ -543,6 +540,7 @@ public:
         case FX_FLANGER: wet = processFlanger(value); break;
         case FX_VOCODER: wet = processVocoder(value); break;
         case FX_RINGMOD: wet = processRingMod(value); break;
+        case FX_REVERB: wet = processReverb(value); break;
       }
       wet = constrain(wet, (int32_t)-32768, (int32_t)32767);
       value = (value * (32768 - wetLevel) + wet * wetLevel) / 32768;
@@ -706,8 +704,48 @@ private:
     return constrain(output, (int32_t)-32768, (int32_t)32767);
   }
 
+  // Four damped parallel combs and two serial all-pass diffusers.
+  // Reserve fixed internal RAM before playback; never allocate per sample.
+  static constexpr int REVERB_SAMPLES = 8832;
+  int16_t *reverbBuffer = nullptr;
+  uint16_t reverbLength[6] = {1392,1776,1968,2064,240,96};
+  uint16_t reverbPosition[6] = {};
+  int32_t reverbDamped[4] = {}, reverbFeedback[4] = {};
+  int32_t reverbDamping = 12000;
+  int32_t processReverb(int32_t input) {
+    if (!reverbBuffer) return input; // Allocation failure preserves dry audio.
+    const int offsets[6] = {0,2112,4224,6336,8448,8704};
+    int32_t sum = 0;
+    for (int line = 0; line < 4; ++line) {
+      int index = offsets[line] + reverbPosition[line];
+      int32_t delayed = reverbBuffer[index];
+      int32_t step = (delayed - reverbDamped[line]) * reverbDamping;
+      reverbDamped[line] += step < 0 ? -((-step + 32767) / 32768) : (step + 32767) / 32768;
+      int32_t drive = (int32_t)((int64_t)input * (32768 - reverbFeedback[line]) / 32768);
+      int32_t feedback = (int32_t)((int64_t)reverbDamped[line] * reverbFeedback[line] / 32768);
+      reverbBuffer[index] = (int16_t)constrain(drive + feedback, (int32_t)-32768, (int32_t)32767);
+      sum += delayed;
+      if (++reverbPosition[line] >= reverbLength[line]) reverbPosition[line] = 0;
+    }
+    int32_t value = sum / 8; // Headroom before diffusion.
+    for (int line = 4; line < 6; ++line) {
+      int index = offsets[line] + reverbPosition[line];
+      int32_t delayed = reverbBuffer[index];
+      int32_t output = delayed - value / 2;
+      reverbBuffer[index] = (int16_t)constrain(value + output / 2, (int32_t)-32768, (int32_t)32767);
+      value = output;
+      if (++reverbPosition[line] >= reverbLength[line]) reverbPosition[line] = 0;
+    }
+    value *= 2;
+    if (value > 28000) value = 28000 + (value - 28000) / 4;
+    if (value < -28000) value = -28000 + (value + 28000) / 4;
+    return constrain(value, (int32_t)-32768, (int32_t)32767);
+  }
+
   void initState() {
     for (auto &instance : instances) if (!instance) { instance = this; break; }
+    reverbBuffer = (int16_t *)heap_caps_malloc(REVERB_SAMPLES * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (reverbBuffer) memset(reverbBuffer, 0, REVERB_SAMPLES * sizeof(int16_t));
     flangerBuffer = (int16_t *)heap_caps_malloc(FLANGER_CAPACITY * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (flangerBuffer) memset(flangerBuffer, 0, FLANGER_CAPACITY * sizeof(int16_t));
     chorusBuffer = (int16_t *)heap_caps_malloc(CHORUS_CAPACITY * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -952,6 +990,17 @@ private:
     flangerDepth = max(1, (int)((uint64_t)sr * (20 + p * 4) / 100000));
     flangerDepth = min(flangerDepth, (int)(FLANGER_CAPACITY - 4) / 2);
     flangerBase = flangerDepth + 2;
+    const int reverbMs[6] = {29,37,41,43,5,2};
+    const int reverbCaps[6] = {2112,2112,2112,2112,256,128};
+    float decaySeconds = 0.6f + parameters[FX_REVERB] * 0.02f;
+    for (int line = 0; line < 6; ++line) {
+      reverbLength[line] = (uint16_t)constrain((int)((uint64_t)sr * reverbMs[line] / 1000), 1, reverbCaps[line]);
+      if (reverbPosition[line] >= reverbLength[line]) reverbPosition[line] = 0;
+      if (line < 4) reverbFeedback[line] = (int32_t)(32768 * min(0.97f,
+        powf(0.001f, (float)reverbLength[line] / (sr * decaySeconds))));
+    }
+    float dampingOmega = 2 * PI * min(4500.0f, sr * 0.25f);
+    reverbDamping = (int32_t)(32768 * dampingOmega / (sr + dampingOmega));
     p = parameters[FX_RINGMOD];
     ringIncrement = (uint32_t)((uint64_t)(30 + p * 20) * 16777216 / sr);
     p = parameters[FX_VOCODER];
@@ -2264,27 +2313,29 @@ void handleJoystick() {
   static uint32_t repeatAt = 0;
   static bool mustRecenter = false;
   static bool settingsLatched = false, wasInSettings = false;
+  static uint32_t settingsRepeatAt = 0;
   if (mainSettingsOpen) {
     wasInSettings = true;
     int dx = analogRead(JOY_X) - joyCenterX, dy = analogRead(JOY_Y) - joyCenterY;
     if (abs(dx) < JOY_DEADZONE && abs(dy) < JOY_DEADZONE) { settingsLatched = false; return; }
-    if (settingsLatched || max(abs(dx), abs(dy)) < JOY_TRIGGER) return;
+    if (max(abs(dx), abs(dy)) < JOY_TRIGGER) return;
+    if (settingsLatched && (int32_t)(millis() - settingsRepeatAt) < 0) return;
+    settingsRepeatAt = millis() + (settingsLatched ? 100 : 350);
     settingsLatched = true;
     if (abs(dy) > abs(dx)) {
-      selectedSetting = (selectedSetting + (dy > 0 ? 1 : 3)) % 4;
+      selectedSetting = (selectedSetting + (dy > 0 ? 1 : MAIN_SETTING_COUNT - 1)) % MAIN_SETTING_COUNT;
     } else {
       int delta = dx > 0 ? 1 : -1;
-      if (!selectedSetting) {
-        screenBrightness = (uint8_t)constrain((int)screenBrightness + delta, 1, 25);
-        applyScreenBrightness();
+      if (selectedSetting == 3) {
+        oledPage = delta > 0 ? 1 : 0; visualizerMode = oledPage == 1;
       } else {
         portENTER_CRITICAL(&fxMux);
-        int band = selectedSetting - 1;
+        int band = selectedSetting;
         eqDB[band] = (int8_t)constrain((int)eqDB[band] + delta, -12, 12);
         ++fxRevision;
         portEXIT_CRITICAL(&fxMux);
       }
-      settingsPending = true; settingsChangedAt = millis();
+      if (selectedSetting < 3) { settingsPending = true; settingsChangedAt = millis(); }
     }
     mainSettingsDirty = true; return;
   }
@@ -2848,10 +2899,8 @@ void handleButtons() {
   if (!mainSettingsOpen && b1 == CLICK_EVENT) {
     changeFX(1); oledPage = 0; visualizerMode = false;
   }
-  if (!mainSettingsOpen && b2 == LONG_EVENT) {
-    oledPage = 1 - oledPage; visualizerMode = oledPage == 1;
-  }
-  if (b2 == CLICK_EVENT) { shuffleMode = !shuffleMode; playerDirty = true; }
+  if (b2 == LONG_EVENT) { shuffleMode = !shuffleMode; playerDirty = true; }
+  if (!mainSettingsOpen && b2 == CLICK_EVENT) playSelected();
   if (!mainSettingsOpen && b1 == LONG_EVENT) {
     portENTER_CRITICAL(&fxMux);
     uint16_t bit = 1U << fxMode;
@@ -2979,7 +3028,7 @@ void renderOLED() {
       int h = constrain((int)spectrumBars[i], 0, 100) * 40 / 100;
       if (h) oled.drawBox(i * 16 + 2, 53 - h, 11, h);
     }
-    oled.drawStr(0, 63, "HOLD E2: FX PAGE");
+    oled.drawStr(0, 63, "JOY SETTINGS: FX PAGE");
   } else {
     oled.setCursor(0, 8); oled.print(fxNames[fxMode]);
     oled.setCursor(105, 8); oled.print((enabledFXMask & (1U << fxMode)) ? "ON" : "OFF");
@@ -2990,7 +3039,7 @@ void renderOLED() {
     oled.setCursor(0, 49);
     if (fxMode == FX_SLOW) oled.printf("SPEED %d%%", 100 - (int)fxMix * 2);
     else oled.printf("CHAIN %d/3  E1 HOLD ON", activeAudioEffects(enabledFXMask));
-    oled.setCursor(0, 63); oled.print((int32_t)(stackLimitUntil - millis()) > 0 ? "LIMIT: 3 AUDIO FX" : "E1 NEXT / E2 SPECTRUM");
+    oled.setCursor(0, 63); oled.print((int32_t)(stackLimitUntil - millis()) > 0 ? "LIMIT: 3 AUDIO FX" : "E1 NEXT / E2 SHUFFLE");
   }
   oled.sendBuffer();
 }
@@ -3077,6 +3126,14 @@ String displayArtist(int index) {
   return "Artist unknown";
 }
 
+String displayAlbum(int index) {
+  if (index < 0 || index >= trackCount) return "Album unknown";
+  const TrackTags *tags = cachedTags(index);
+  if (tags && tags->album[0]) return String(tags->album);
+  char folder[96]; trackAlbumFolder(tracks[index].path.c_str(), folder, sizeof(folder));
+  return folder[0] ? String(folder) : String("Album unknown");
+}
+
 String displayTrackName(int index) {
   if (index < 0 || index >= trackCount) return "NO TRACK";
   const TrackTags *tags = cachedTags(index);
@@ -3127,7 +3184,8 @@ void drawPlayer() {
   tft.setCursor(18, 105);
   tft.print(displayArtist(playingTrack >= 0 ? playingTrack : selectedTrack).substring(0, 34));
   tft.setCursor(18, 118);
-  tft.printf("%u > %u Hz /16", (unsigned)activeSampleRate, (unsigned)outputSampleRate);
+  tft.print("ALBUM ");
+  tft.print(displayAlbum(playingTrack >= 0 ? playingTrack : selectedTrack).substring(0, 28));
 }
 
 // ================================================================
@@ -3145,7 +3203,8 @@ void drawBrowser() {
   tft.setTextSize(1);
   tft.setTextColor(C_MUTED);
   tft.setCursor(18, 172);
-  tft.printf("LIBRARY %d/%u", trackCount ? selectedTrack + 1 : 0, (unsigned)trackCount);
+  tft.printf("LIB %d/%u", trackCount ? selectedTrack + 1 : 0, (unsigned)trackCount);
+  tft.setCursor(102, 172); tft.print(displayAlbum(selectedTrack).substring(0, 20));
   if (!trackCount) {
     tft.setCursor(18, 200); tft.print("Insert SD with FLAC files"); return;
   }
@@ -3193,18 +3252,18 @@ void drawVolume() {
 // ================================================================
 
 void drawMainSettings() {
-  static int lastSelected = -1, lastValues[4] = {-100, -100, -100, -100};
+  static int lastSelected = -1, lastValues[MAIN_SETTING_COUNT] = {-100,-100,-100,-100};
   bool full = mainSettingsLayoutDirty;
   if (full) {
     tft.setTextSize(1); tft.setTextColor(C_MUTED);
-    tft.setCursor(14, 40); tft.print("DISPLAY & SOUND");
-    tft.setCursor(14, 267); tft.print(DAW_SERIAL_DIAGNOSTICS ? "V6 20261013 LOG:ON" : "V6 20261013 LOG:OFF");
+    tft.setCursor(14, 40); tft.print("EQ / OLED VIEW");
+    tft.setCursor(14, 267); tft.print(DAW_SERIAL_DIAGNOSTICS ? "V6 R2 20261013 LOG:ON" : "V6 R2 20261013 LOG:OFF");
     tft.setCursor(14, 282); tft.print("JOY UP/DOWN: SELECT");
     tft.setCursor(14, 298); tft.print("L/R ADJUST  CLICK BACK");
   }
-  const char *labels[4] = {"BRIGHTNESS", "BASS", "MID", "TREBLE"};
-  for (int row = 0; row < 4; ++row) {
-    int raw = row ? eqDB[row - 1] : screenBrightness;
+  const char *labels[MAIN_SETTING_COUNT] = {"BASS", "MID", "TREBLE", "OLED VIEW"};
+  for (int row = 0; row < MAIN_SETTING_COUNT; ++row) {
+    int raw = row == 3 ? oledPage : eqDB[row];
     bool selectionChanged = selectedSetting != lastSelected && (row == selectedSetting || row == lastSelected);
     if (!full && !selectionChanged && lastValues[row] == raw) continue;
     lastValues[row] = raw;
@@ -3213,13 +3272,11 @@ void drawMainSettings() {
     tft.drawRoundRect(10, y, 220, 45, 7, row == selectedSetting ? C_CYAN : C_BORDER);
     tft.setTextSize(1); tft.setTextColor(row == selectedSetting ? C_CYAN : C_MUTED);
     tft.setCursor(20, y + 8); tft.print(labels[row]);
-    tft.setTextSize(2); tft.setTextColor(C_WHITE); tft.setCursor(20, y + 22);
-    if (!row) tft.printf("%d/25", (int)screenBrightness);
-    else tft.printf("%+d dB", (int)eqDB[row - 1]);
-    int value = row ? eqDB[row - 1] + 12 : screenBrightness;
-    int total = row ? 24 : 25;
+    tft.setTextColor(C_WHITE); tft.setCursor(20, y + 22);
+    if (row == 3) { tft.print(oledPage ? "SPECTRUM" : "FX"); continue; }
+    tft.setTextSize(2); tft.printf("%+d dB", (int)eqDB[row]);
     tft.fillRoundRect(123, y + 25, 94, 5, 2, C_BORDER);
-    int width = value * 94 / total;
+    int width = (eqDB[row] + 12) * 94 / 24;
     if (width) tft.fillRoundRect(123, y + 25, width, 5, 2, C_CYAN);
   }
   lastSelected = selectedSetting; mainSettingsLayoutDirty = false;
@@ -3421,13 +3478,9 @@ void setup() {
   // TFT
   // --------------------------------------------------------------
 
-  backlightReady = ledcAttach(
-    TFT_BL,
-    5000,
-    8
-  );
-
-  applyScreenBrightness();
+  // Brightness control removed: fixed full backlight and OLED contrast.
+  pinMode(TFT_BL, OUTPUT); digitalWrite(TFT_BL, HIGH);
+  oled.setContrast(255);
 
   tft.begin();
   panel.init(
@@ -3890,7 +3943,7 @@ void setup() {
   );
 
   DAW_LOG.println(
-    "[SYSTEM] ENC2 CLICK = SHUFFLE / SEQUENTIAL"
+    "[SYSTEM] ENC2 CLICK = PLAY SELECTED SONG"
   );
 
   DAW_LOG.println(
@@ -3906,7 +3959,7 @@ void setup() {
   );
 
   DAW_LOG.println(
-    "[SYSTEM] E1 CLICK NEXT FX / E1 HOLD STAGE ON-OFF / E2 HOLD SPECTRUM / JOY SETTINGS"
+    "[SYSTEM] E1 CLICK NEXT FX / E1 HOLD STAGE ON-OFF / E2 HOLD SHUFFLE / JOY SETTINGS"
   );
 
   DAW_LOG.println(
@@ -3914,7 +3967,7 @@ void setup() {
   );
 
   DAW_LOG.println(
-    "[SYSTEM] ENC2 LONG = FX / SPECTRUM"
+    "[SYSTEM] ENC2 LONG = SHUFFLE / SEQUENTIAL"
   );
 }
 
@@ -3927,7 +3980,7 @@ void loadFXSettings() {
   if (!preferencesReady) return;
   size_t length = fxPreferences.getBytesLength("values");
   uint8_t values[FX_COUNT * 2];
-  if ((length == 16 || length == 18 || length == sizeof(values)) && fxPreferences.getBytes("values", values, length) == length) {
+  if ((length == 16 || length == 18 || length == 26 || length == sizeof(values)) && fxPreferences.getBytes("values", values, length) == length) {
     int slots = length / 2;
     for (int i = 0; i < slots; ++i) {
       storedParam[i] = min(values[i], (uint8_t)25);
@@ -3949,8 +4002,6 @@ void loadFXSettings() {
     settingsPending = true; settingsChangedAt = millis();
   }
   memcpy(storedParam, fxCharacterPreset, sizeof(storedParam));
-  if (fxPreferences.getBytesLength("bright") == sizeof(screenBrightness)) fxPreferences.getBytes("bright", &screenBrightness, sizeof(screenBrightness));
-  screenBrightness = (uint8_t)constrain((int)screenBrightness, 1, 25);
   fxParam = storedParam[fxMode]; fxMix = storedMix[fxMode];
 }
 
@@ -3965,7 +4016,6 @@ void saveFXSettingsWhenIdle() {
   bool saved = fxPreferences.putBytes("values", values, sizeof(values)) == sizeof(values);
   if (saved) saved = fxPreferences.putBytes("eq", eqDB, sizeof(eqDB)) == sizeof(eqDB);
   if (saved) saved = fxPreferences.putBytes("mask", &enabledFXMask, sizeof(enabledFXMask)) == sizeof(enabledFXMask);
-  if (saved) saved = fxPreferences.putBytes("bright", &screenBrightness, sizeof(screenBrightness)) == sizeof(screenBrightness);
   uint8_t simpleVersion = 1;
   if (saved) saved = fxPreferences.putBytes("simple", &simpleVersion, sizeof(simpleVersion)) == sizeof(simpleVersion);
   if (audioMutex) xSemaphoreGive(audioMutex);

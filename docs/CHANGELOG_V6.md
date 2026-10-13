@@ -52,3 +52,14 @@ Full local ESP32 compilation, PowerShell execution, physical uploads and listeni
 - Assign encoder 2 rotation to wrapped library browsing; keep click shuffle and hold FX/spectrum.
 - Show V6 20261013 LOG:OFF/ON in settings. Extend actual-source host tests for RAM drawing during audio lock contention, SPI transfer independence/refresh, repeat behavior and E2 browsing; add actual-header canvas allocation/clipping/fairness stress tests.
 - Hardware acceptance remains pending; especially verify audio continuity under short SPI transfers, display recovery, joystick response and maximum-stack playback. PC serial-disconnect distortion remains open.
+
+
+## R2: reverb, album and final E2 mapping
+
+- Append REVERB as persisted FX ID 13; add four damped combs/two all-pass diffusers, fixed startup internal-RAM allocation, bounded lengths/feedback, output headroom and dry fallback on allocation failure. It keeps independent saved strength and the existing per-stage enable/three-PCM-stage cap. Accept old 26-byte strength/parameter records alongside 16/18/new 28-byte records.
+- Final E2 mapping: rotate library, click play highlighted song, hold shuffle. Move OLED FX/spectrum selection into main settings; preserve E1 stage controls and joystick play/pause.
+- Add ALBUM tag parsing and parent-folder fallback, with album text in playing card and selected-album library header. Existing cache/deferred reads and bounded UTF-8 handling remain.
+- Held settings adjustments repeat after 350 ms at 100 ms intervals. Main settings now have bass/mid/treble and OLED view; show V6 R2 20261013 LOG:OFF/ON.
+- Remove adjustable brightness, PWM setup and bright NVS reads/writes; fix TFT BL HIGH and OLED contrast to 255. Ignore old bright preferences without disturbing FX/EQ.
+- Normalize positive EQ boosts with preamp attenuation to reduce digital overload. Flat-EQ clean PCM remains unaffected; analog headphone/load distortion remains unverified.
+- Extend host checks for reverb tail/decay at 8/44.1/48/192 kHz, dry allocation-failure fallback, no processing allocations, old/new persistence, E2 mapping/OLED settings, held EQ adjustment, no brightness read/write, ALBUM/folder fallback and positive-EQ headroom. Listening, wiring and runtime memory/timing still require hardware tests.

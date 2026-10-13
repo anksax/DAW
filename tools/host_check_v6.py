@@ -22,8 +22,8 @@ using portMUX_TYPE=int;
 #define portEXIT_CRITICAL(x) ((void)(x))
 #define MALLOC_CAP_INTERNAL 1
 #define MALLOC_CAP_8BIT 2
-int allocations=0;
-void *heap_caps_malloc(size_t n,int){++allocations;return malloc(n);}
+int allocations=0;bool failAllAllocations=false;
+void *heap_caps_malloc(size_t n,int){++allocations;return failAllAllocations?nullptr:malloc(n);}
 struct AudioInfo {int sample_rate=0,channels=0,bits_per_sample=0;};
 class AudioStream {
 public:
@@ -64,12 +64,8 @@ public:
 };
 unsigned millis();
 uint32_t micros(){static uint32_t time=0;return time+=10;}
-#define TFT_BL 21
-int lastDuty=-1;
-struct OLED {void setContrast(uint8_t){}} oled;
 struct SerialStub {template<class... T>void printf(const char*,T...){}} Serial;
 #define DAW_LOG Serial
-bool ledcWrite(int pin,uint32_t duty){assert(pin==TFT_BL && duty<=255);lastDuty=duty;return true;}
 int source=0,decoder=0;
 '''
 master=s[s.index('// Master volume is applied AFTER'):s.index('// ================================================================\n// AUDIO FORMAT WATCHER')]
@@ -78,6 +74,23 @@ fft=s[s.index('static constexpr int FFT_N'):s.index('// ========================
 tests=r'''
 int main(){
  initTremoloLUT();initFFT();
+ {DJFXEffect tone;enabledFXMask=0;eqDB[0]=eqDB[1]=eqDB[2]=12;++fxRevision;DJFXEffect::prepareAll();
+  for(int i=0;i<1000;++i)assert(tone.process(20000)==20000);
+  eqDB[0]=eqDB[1]=eqDB[2]=0;}
+ std::cout<<"PASS: positive EQ boost compensation preserves clean full-scale gain when bands are equally boosted\n";
+
+ for(int rate:{8000,44100,48000,192000}) {
+  DJFXEffect room;room.prepare(rate,FX_REVERB,56,100,true,800+rate);
+  for(int i=0;i<rate/20;++i)room.process(0);
+  room.process(28000);int tail=0;int allocationsBefore=allocations;
+  for(int i=0;i<rate;++i)if(room.process(0)!=0)++tail;
+  assert(tail>20);assert(allocations==allocationsBefore);
+  for(int i=0;i<rate*6;++i)room.process(0);
+  assert(abs((int)room.process(0))<3);
+ }
+ failAllAllocations=true;{DJFXEffect room;room.prepare(48000,FX_REVERB,56,100,true,444);assert(room.process(1234)==1234);}failAllAllocations=false;
+ std::cout<<"PASS: reverb impulse tail/decay, 8/44.1/48/192 kHz bounds, allocation-failure dry fallback, no per-sample allocations\n";
+
  for(int rate:{8000,24000,48000,192000}) {
   DJFXEffect voice;outputSampleRate=rate;enabledFXMask=1<<FX_VOCODER;
   for(int block=0;block<100;++block){
@@ -109,7 +122,7 @@ int main(){
   for(int p=0;p<=100;p+=10){effect.prepare(192000,mode,p,100,true,++rev);effect.process(-32768);}
   assert(allocations==before);
  }
- std::cout<<"PASS: bypass and zero mix are bit-exact; all twelve DSP effects alter PCM; no allocations in processing or parameter updates\n";
+ std::cout<<"PASS: bypass and zero mix are bit-exact; all thirteen PCM effects alter PCM; no allocations in processing or parameter updates\n";
  masterVolumePercent=12;
  int16_t loud[600];std::fill(std::begin(loud),std::end(loud),20000);
  assert(masterOutput.write((uint8_t*)loud,sizeof(loud))==sizeof(loud));

@@ -12,9 +12,9 @@ Run `bash validation/run_checks.sh`. Python extracts the current DSP/control cod
 | Formats | 44.1/48 kHz, mono/stereo, 16/24-bit source, track rate changes |
 | Transport | Pause/resume position, EOF next, shuffle no immediate repeat, previous |
 | Controls | Click versus hold, clockwise E1 behavior, joystick neutral/re-arm, settings exit |
-| Persistence | Change strengths/mask/EQ/brightness, pause, wait two seconds, power cycle |
+| Persistence | Change strengths/mask/EQ, pause, wait two seconds, power cycle |
 | Audio | Every effect individually, maximum stack, rapid SLOW/vocoder edits, silence and clipping |
-| UI | OLED FX/spectrum, TFT title/artist/timeline, brightness GPIO 21, missing tags |
+| UI | OLED FX/spectrum, TFT title/artist/timeline, fixed backlight GPIO 21, missing tags |
 | USB | Close monitor and IDE mid-song, reopen, compare USB wall-charger operation |
 | Endurance | One hour playback with and without FX/visualization |
 
@@ -26,3 +26,5 @@ Future work includes seeking, queue/folder navigation, recording, MIDI, pitch-pr
 
 
 The 13 October revision uses a PSRAM TFT canvas and one 8-row SPI stripe per loop. Test that controls/browser update while playing, vertical joystick holds repeat, horizontal holds do not repeatedly restart tracks, canvas failure leaves audio/OLED diagnostic usable, and full screen changes never clear physical pixels before redraw. Measure [PERF] displayHoldMaxUs rather than assuming a hard timing limit from stripe size. Check continuous audio at 44.1/48/192 kHz with the maximum FX stack and visualizer; the actual scheduler/I2S behavior is not simulated by host tests. Uncached artist reads intentionally wait until pause/stop. Check random blank-panel recovery from five-second retained-content repainting; a reset/sleep/power fault may require separate hardware work.
+
+R2 acceptance also covers saved reverb tails/strength, E2 click song selection/hold shuffle, ALBUM versus folder fallback, positive EQ boost headroom and removed brightness preferences.

@@ -20,9 +20,14 @@ Reader make(const std::vector<std::string> &tags,bool picture=false){
  block(f.data,4,true,comment);return f;
 }
 int main(){
+ char albumFolder[96];
+ trackAlbumFolder("/Artist/Album Name/song.flac",albumFolder,sizeof(albumFolder));assert(!strcmp(albumFolder,"Album Name"));
+ trackAlbumFolder("Album/song.flac",albumFolder,sizeof(albumFolder));assert(!strcmp(albumFolder,"Album"));
+ trackAlbumFolder("/song.flac",albumFolder,sizeof(albumFolder));assert(!albumFolder[0]);
+ trackAlbumFolder("song.flac",albumFolder,sizeof(albumFolder));assert(!albumFolder[0]);
  TrackTags tags;
- auto f=make({"TITLE=Example","artist=One","ARTIST=Two","ALBUMARTIST=Various Artists"},true);
- assert(readFLACTextTags(f,tags));assert(!strcmp(tags.title,"Example")&&!strcmp(tags.artist,"One / Two")&&!strcmp(tags.albumArtist,"Various Artists"));assert(f.reads<1000);
+ auto f=make({"TITLE=Example","artist=One","ARTIST=Two","ALBUMARTIST=Various Artists","album=Album Name"},true);
+ assert(readFLACTextTags(f,tags));assert(!strcmp(tags.title,"Example")&&!strcmp(tags.artist,"One / Two")&&!strcmp(tags.albumArtist,"Various Artists"));assert(!strcmp(tags.album,"Album Name"));assert(f.reads<1000);
  f=make({"ALBUM ARTIST=Fallback"});assert(readFLACTextTags(f,tags)&&tags.artist[0]==0&&!strcmp(tags.albumArtist,"Fallback"));
  f=make({"TITLE="+std::string(94,'x')+"\xc3\xa9"});assert(readFLACTextTags(f,tags)&&strlen(tags.title)==94);
  f=make({"TITLE=Before"});f.data.pop_back();assert(!readFLACTextTags(f,tags)&&!tags.title[0]);
@@ -36,5 +41,5 @@ int main(){
   if(test%3==0)f.data.resize(f.data.size()/2);
   readFLACTextTags(f,tags);
  }
- std::cout<<"PASS: title/artist/album-artist tags, repeated artists, case-insensitive keys, picture skip, UTF-8 truncation, malformed bounds, 5000 fuzz cases\n";
+ std::cout<<"PASS: album folder fallback and title/artist/album/album-artist tags, repeated artists, case-insensitive keys, picture skip, UTF-8 truncation, malformed bounds, 5000 fuzz cases\n";
 }

@@ -72,8 +72,8 @@ tests=r'''
 
  fxMode=FX_FILTER;fxMix=storedMix[fxMode];
  enc1Button.event=CLICK_EVENT;handleButtons();assert(fxMode==FX_ECHO && !visualizerMode);
- enc2Button.event=LONG_EVENT;handleButtons();assert(visualizerMode && oledPage==1 && fxMode==FX_ECHO);
- enc2Button.event=LONG_EVENT;handleButtons();assert(!visualizerMode && oledPage==0);
+ enc2Button.event=LONG_EVENT;handleButtons();assert(shuffleMode && !visualizerMode && fxMode==FX_ECHO);
+ enc2Button.event=LONG_EVENT;handleButtons();assert(!shuffleMode && !visualizerMode && oledPage==0);
  encoder1Edges=-400;handleEncoders();assert(fxMix==25);
  encoder1Edges=400;handleEncoders();assert(fxMix==0);
  int beforeBrowse=selectedTrack;encoder2Edges=8;handleEncoders();assert(fxMix==0 && selectedTrack==(beforeBrowse+2)%trackCount);
@@ -86,22 +86,27 @@ tests=r'''
  enc1Button.event=LONG_EVENT;handleButtons();assert(playbackRateFor(48000)==48000);
  fxMode=FX_PHASER;enc1Button.event=LONG_EVENT;handleButtons();assert(activeAudioEffects(enabledFXMask)==2);
  joyButton.event=LONG_EVENT;handleButtons();assert(mainSettingsOpen && !pauseCalls);
- selectedSetting=0;screenBrightness=18;backlightReady=true;
+ selectedSetting=0;eqDB[0]=0;
  auto joy=[&](int dx,int dy){rawX=joyCenterX;rawY=joyCenterY;handleJoystick();rawX+=dx;rawY+=dy;handleJoystick();};
- joy(1600,0);assert(screenBrightness==19 && lastDuty==(int)brightnessDuty(19));
- handleJoystick();assert(screenBrightness==19); // held deflection does not repeat.
+ joy(1600,0);assert(eqDB[0]==1);
+ handleJoystick();assert(eqDB[0]==1);
+ fakeMillis+=350;handleJoystick();assert(eqDB[0]==2);
+ fakeMillis+=100;handleJoystick();assert(eqDB[0]==3);
  joy(0,1600);assert(selectedSetting==1);
- joy(1600,0);assert(eqDB[0]==1 && !playCalls);
- joy(-1600,0);assert(eqDB[0]==0 && !previousCalls);
+ joy(1600,0);assert(eqDB[1]==1 && !playCalls);
+ joy(-1600,0);assert(eqDB[1]==0 && !previousCalls);
+ selectedSetting=0;
  for(int i=0;i<30;++i){joy(1600,0);}assert(eqDB[0]==12);
  for(int i=0;i<30;++i){joy(-1600,0);}assert(eqDB[0]==-12);
  int selection=selectedSetting;encoder1Edges=40;encoder2Edges=40;handleEncoders();assert(selectedSetting==selection && eqDB[0]==-12);
  enc1Button.event=CLICK_EVENT;handleButtons();assert(fxMode==FX_PHASER);
- enc2Button.event=CLICK_EVENT;handleButtons();assert(shuffleMode && !pauseCalls);
+ int settingsPlayCalls=playCalls;enc2Button.event=CLICK_EVENT;handleButtons();assert(playCalls==settingsPlayCalls && !pauseCalls);
+ selectedSetting=3;joy(1600,0);assert(oledPage==1 && visualizerMode);joy(-1600,0);assert(oledPage==0 && !visualizerMode);selectedSetting=selection;
  joyButton.event=CLICK_EVENT;handleButtons();assert(!mainSettingsOpen && !pauseCalls);
  fakeMillis+=100;handleJoystick();assert(!previousCalls); // exit whilst deflected must not skip a song.
  rawX=joyCenterX;rawY=joyCenterY;fakeMillis+=100;handleJoystick();assert(!joyLatched);
  joyButton.event=CLICK_EVENT;handleButtons();assert(pauseCalls==1);
+ int beforeSelection=playCalls;enc2Button.event=CLICK_EVENT;handleButtons();assert(playCalls==beforeSelection+1 && !shuffleMode);
  playingTrack=-1;
  auto move=[&](int dx,int dy){rawX=2048;rawY=2048;fakeMillis+=30;handleJoystick();rawX+=dx;rawY+=dy;fakeMillis+=30;handleJoystick();};
  selectedTrack=0;move(0,1000);assert(selectedTrack==1);move(0,-1000);assert(selectedTrack==0);move(0,-1000);assert(selectedTrack==4);
@@ -118,20 +123,19 @@ tests=r'''
  fakeMillis+=200;servicePlaybackRate();assert(outputSampleRate==24000);
  storedMix[FX_SLOW]=5;rateChangedAt=fakeMillis;fakeMillis+=249;servicePlaybackRate();assert(outputSampleRate==24000);
  fakeMillis+=1;servicePlaybackRate();assert(!rateChangePending && outputSampleRate==43200);
- assert(brightnessDuty(1)==4 && brightnessDuty(25)==255);
  enabledFXMask=0;
 
- for(int slots:{8,9,13}) {
+ for(int slots:{8,9,13,14}) {
   fxPreferences.data.clear();std::vector<uint8_t> old(slots*2);
   for(int i=0;i<slots;++i){old[i]=(i+3)%26;old[i+slots]=(i+14)%26;}
   fxPreferences.data["values"]=old;loadFXSettings();
   for(int i=0;i<slots;++i){assert(storedParam[i]==fxCharacterPreset[i]);if(i!=FX_SLOW)assert(storedMix[i]==old[i+slots]);}
   if(slots>=9)assert(storedMix[FX_SLOW]==25-old[FX_SLOW]);
  }
- preferencesReady=true;screenBrightness=9;storedMix[FX_RINGMOD]=7;eqDB[2]=5;settingsPending=true;settingsChangedAt=0;
+ preferencesReady=true;storedMix[FX_RINGMOD]=7;storedMix[FX_REVERB]=9;enabledFXMask=1<<FX_REVERB;eqDB[2]=5;settingsPending=true;settingsChangedAt=0;
  sharedPlayState=PLAYING;saveFXSettingsWhenIdle();assert(settingsPending);
- sharedPlayState=PAUSED;saveFXSettingsWhenIdle();assert(!settingsPending);
- screenBrightness=25;storedMix[FX_RINGMOD]=25;eqDB[2]=0;loadFXSettings();assert(screenBrightness==9 && storedMix[FX_RINGMOD]==7 && eqDB[2]==5);
+ sharedPlayState=PAUSED;saveFXSettingsWhenIdle();assert(!settingsPending && !fxPreferences.data.count("bright"));
+ storedMix[FX_RINGMOD]=25;eqDB[2]=0;fxPreferences.data["bright"]={1};loadFXSettings();assert(storedMix[FX_RINGMOD]==7 && storedMix[FX_REVERB]==9 && (enabledFXMask&(1<<FX_REVERB)) && eqDB[2]==5);
  eqDB[0]=eqDB[1]=eqDB[2]=0;enabledFXMask=0;++fxRevision;DJFXEffect::prepareAll();
  trackPCMBytes=0;trackTotalFrames=48000*10;trackSourceRate=48000;trackChannels=2;timelineCounting=true;
  int16_t timelineData[9600]={};masterOutput.write((uint8_t*)timelineData,sizeof(timelineData));

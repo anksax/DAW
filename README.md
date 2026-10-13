@@ -15,7 +15,7 @@ A standalone FLAC player and DJ-style audio console for the **ESP32-S3 N16R8**, 
 3. Use ESP32S3 Dev Module, 16 MB flash, OPI PSRAM and the settings in [Board setup](docs/BOARD_SETUP.md). Wiring is in [Hardware](docs/HARDWARE.md).
 4. Put mono/stereo `.flac` files on microSD; nested folders are scanned. Source 24-bit FLAC is decoded into **16-bit PCM** for DSP/I2S. This is not a 24-bit output pipeline.
 5. Compile and upload. Joystick click starts the selected track; playback does not start automatically at boot. At EOF, playback advances automatically in sequence or shuffle mode.
-6. Hold the joystick to open settings and confirm the build label **V6 20261013 LOG:OFF**. This identifies the new firmware; a failed build/upload can leave the previous build installed.
+6. Hold the joystick to open settings and confirm the build label **V6 R2 20261013 LOG:OFF**. This identifies the new firmware; a failed build/upload can leave the previous build installed.
 7. Serial diagnostics are **off by default**. For a capture, set `DAW_SERIAL_DIAGNOSTICS` to `1` in `SerialDiagnostics.h` and rebuild; use 115200 baud. Return it to `0` for normal use.
 
 For Windows, extract the complete project first. A simple path such as `C:\Arduino\DJ_Audio_Console_V6` avoids command-parser issues. See [Troubleshooting](docs/TROUBLESHOOTING.md).
@@ -27,19 +27,19 @@ For Windows, extract the complete project first. A simple path such as `C:\Ardui
 | Encoder 1 rotate | Selected FX strength, 0–25; reversed rotation retained |
 | Encoder 1 click | Next effect and return to FX page |
 | Encoder 1 hold | Selected effect ON/OFF |
-| Encoder 2 click | Shuffle / sequential |
-| Encoder 2 hold | FX / spectrum page on OLED |
+| Encoder 2 click | Play the highlighted song |
+| Encoder 2 hold | Shuffle / sequential |
 | Encoder 2 rotate | Browse tracks without changing the playing song |
 | Joystick up/down | Browse tracks; hold vertically to repeat after 450 ms |
 | Joystick right | Play selected track |
 | Joystick left | Previous playing track |
 | Joystick click | Play/pause/resume; exit settings when settings are open |
-| Joystick hold | Open/close main-screen brightness/EQ settings |
-| Joystick up/down in settings | Select brightness, bass, mid or treble |
+| Joystick hold | Open/close main-screen EQ/OLED settings |
+| Joystick up/down in settings | Select bass, mid, treble or OLED view |
 | Joystick left/right in settings | Decrease/increase selected setting |
 | Fader | Master volume, 0–25 |
 
-Encoders do not edit main-screen settings. FX and spectrum appear only on the OLED. Title, artist, timeline, library, volume and settings appear on the TFT. Brightness controls TFT PWM and OLED contrast; TFT BL must be connected to GPIO 21.
+Encoder 2 hold toggles shuffle even in settings; rotation/click do not edit settings. OLED view switches FX/spectrum using joystick left/right on its settings row. FX and spectrum appear only on the OLED. Title, artist, album, timeline, library, volume and settings appear on the TFT. The adjustable brightness setting is removed; TFT BL is fixed HIGH and OLED contrast is fixed full.
 
 ## Audio path and effects
 
@@ -59,16 +59,17 @@ FLAC from SD → Foxen PCM16 decoder → PCM visualization tap → per-channel D
 | Flanger | Short modulated delay with feedback |
 | Vocoder | Six-band track-envelope modulation of a local synth carrier |
 | Ring modulation | Multiplication by an oscillator |
+| Reverb | Four damped comb delays and two all-pass diffusers; saved 0–25 strength |
 
 Enable up to **three PCM effects**, plus SLOW. Only per-effect enable toggles exist; there is no separate global enable control. Each effect keeps its own 0–25 strength when browsing effects. Internal character presets replace separate parameter/mix controls. Bass/mid/treble EQ is ±12 dB.
 
-FX strength, enabled stages, EQ and brightness are stored in NVS after changes settle and playback is paused/stopped. Pause and wait at least two seconds before removing power if you want edits saved. Legacy settings are migrated. Volume, shuffle and track selection are not persisted.
+FX strength, enabled stages and EQ are stored in NVS after changes settle and playback is paused/stopped. Pause and wait at least two seconds before removing power if you want edits saved. Legacy settings are migrated. Volume, shuffle and track selection are not persisted.
 
 SLOW changes wait for **250 ms without another adjustment**, then update the output clock only if the requested rate differs. This reduces repeated reconfiguration; a final clock transition can still be audible. SLOW is not pitch-preserving time stretching. Vocoder uses a four-harmonic carrier, lower gain, a soft clipping knee and approximately 20 ms strength/enable ramps. Hardware sound quality remains under test.
 
 ## Metadata, timeline and visualization
 
-- Bounded native FLAC Vorbis-comment parsing for TITLE, ARTIST and ALBUMARTIST, with a small cache for visible/playing tracks.
+- Bounded native FLAC Vorbis-comment parsing for TITLE, ARTIST, ALBUM and ALBUMARTIST, with a small cache for visible/playing tracks.
 - Missing artist tags display as unknown. [MusicBrainz Picard tagging](docs/MUSICBRAINZ_TAGGING.md) happens on a PC; the ESP32 does not query MusicBrainz or extract vocal stems.
 - Timeline comes from decoded source-frame progress and FLAC total samples. It tracks source position under SLOW. Seeking/scrubbing is not implemented.
 - Eight FFT bands use real decoded PCM, with smoothing and peaks. Master gain is applied after DSP.
@@ -94,7 +95,7 @@ Host checks regenerate DSP/control tests from the sketch and run address/undefin
 ## Known limits and next checks
 
 - Closing Arduino IDE/Serial Monitor still produces distorted output on the user's board. The root cause is unconfirmed. Test standalone USB power and distinguish a reboot from an audio stall; see [Troubleshooting](docs/TROUBLESHOOTING.md).
-- Hardware confirmation is needed for joystick navigation, TFT brightness, rapid SLOW/vocoder changes, long playback, sample-rate changes and USB disconnects.
+- Hardware confirmation is needed for joystick navigation, fixed TFT backlight, rapid SLOW/vocoder changes, long playback, sample-rate changes and USB disconnects.
 - TFT and SD share SPI. UI drawing uses a 153,600-byte PSRAM canvas; only one 8-row stripe is transferred per loop, at 16 MHz. The standard Arduino SPIClass transaction mutex serializes TFT and SD traffic; transfers do not acquire the broader decoder/I2S audio mutex. A five-second repaint restores retained pixels without clearing/resetting the panel. This is recovery for lost contents, not proof of a physical SPI/reset/power fix.
 - New tag reads are deferred while playing. Previously cached tags remain visible; uncached artists show a pause-to-read hint until playback pauses/stops.
 - No dual-deck mixing, recording, network metadata lookup, MP3, MIDI or pitch-preserving time stretching is implemented. Two-song mixing requires separate decoder/buffer paths and a mixer; it is not enabled by stacking effects.
@@ -104,4 +105,17 @@ See [V6 changes](docs/CHANGELOG_V6.md), [development/testing](docs/DEVELOPMENT.m
 
 ### Playback/UI scheduling revision (13 October)
 
-The joystick and encoders are sampled first in the loop. Expensive TFT composition runs in PSRAM without acquiring the audio lock; short stripe transfers use the SPIClass transaction mutex instead of waiting behind an entire decoder/I2S copy. Joystick vertical hold repeats every 140 ms after an initial 450 ms; horizontal play/previous actions stay one-shot, and exiting settings still requires neutral. Encoder 2 rotation browses the library; click/hold keep shuffle/visualizer. OPI PSRAM must be enabled; failed canvas allocation shows an OLED error and leaves audio usable. Physical timing and the random blank-panel symptom require board verification. These changes do not claim to fix the existing PC USB-disconnect distortion.
+The joystick and encoders are sampled first in the loop. Expensive TFT composition runs in PSRAM without acquiring the audio lock; short stripe transfers use the SPIClass transaction mutex instead of waiting behind an entire decoder/I2S copy. Joystick vertical hold repeats every 140 ms after an initial 450 ms; horizontal play/previous actions stay one-shot, and exiting settings still requires neutral. Encoder 2 rotation browses the library; click plays the highlighted song, hold toggles shuffle, and OLED view is selected in settings. OPI PSRAM must be enabled; failed canvas allocation shows an OLED error and leaves audio usable. Physical timing and the random blank-panel symptom require board verification. These changes do not claim to fix the existing PC USB-disconnect distortion.
+
+
+### Reverb, album and control update (R2)
+
+Select REVERB in the FX list with E1 click, adjust strength with E1 rotation and enable it with E1 hold. It uses fixed internal-RAM delay lines, approximately 17.25 KiB per DSP instance (about 51.75 KiB for prototype/stereo clones), no sample-loop allocation, damping, stable feedback and diffusers. Delay lengths are capped at higher sample rates. Old 13-effect NVS records migrate into the 14-effect layout without losing strength settings; reverb starts disabled with strength 12.
+
+E2 rotates to browse, clicks to start the highlighted track, and holds to toggle shuffle. OLED FX/spectrum is now selected in main settings. Joystick settings hold repeats after 350 ms at 100 ms intervals. Reverb retains the same three-PCM-stage cap and idle-save behavior as other FX.
+
+The playing card shows the ALBUM tag when cached, otherwise the parent folder immediately. The library header also shows the selected song's album. Root-level tracks without tags show Album unknown. Names longer than the visible fields are truncated; title/artist/album share the existing small cache and new SD tag reads still wait until pause/stop.
+
+The brightness setting and its saved NVS reads/writes are removed. The TFT backlight is driven HIGH and OLED contrast is fixed at 255. Old bright values are ignored without erasing other preferences.
+
+Positive EQ boosts now include automatic preamp attenuation equal to the largest positive boost, preserving relative EQ shaping while reducing digital clipping. This can reduce apparent loudness and does not recover deliberately distorted FX or correct an overloaded analog output. If headphones connect directly to a PCM5102A, its line output is specified for loads down to 1 kOhm, so low-impedance headphones need a suitable headphone amplifier. Source: https://www.ti.com/lit/ds/symlink/pcm5102a.pdf. High-volume clarity with EQ flat/FX off remains a hardware listening check.

@@ -204,3 +204,14 @@ Include:
 The 13 October build draws in a PSRAM canvas and queues short SPI stripes, using the driver SPI transaction lock instead of waiting behind the whole audio copy. It samples controls before drawing and delays new metadata reads until pause/stop. Encoder 2 rotation can browse; held joystick up/down repeats. Check settings for V6 20261013 LOG:OFF and confirm OPI PSRAM is enabled. A failed canvas allocation reports TFT BUFFER FAILED / CHECK OPI PSRAM on OLED.
 
 A retained-content repaint occurs every five seconds. If the panel remains blank while the OLED/transport respond, collect the physical TFT CS/DC/RST and power wiring details. No display readback is available to prove whether the controller reset or slept; neither backlight being on nor successful compilation proves the panel's data connection. Do not erase flash/NVS as a first response to this symptom.
+
+
+## R2: high-volume clarity
+
+Brightness adjustment is removed; the backlight has a fixed full output. Old bright preferences are ignored.
+
+For loss of clarity, compare FX disabled and bass/mid/treble 0 dB at the same volume. Positive EQ boosts now apply compensating preamp attenuation, which may lower loudness. This is distinct from intentional fuzz/distortion/bitcrusher. Check whether the output feeds a headphone amplifier or drives headphones directly; PCM5102A line output is specified for >=1 kOhm loads, not typical low-impedance earphones. Reducing digital gain cannot establish or fix an analog load/power fault.
+
+Final E2 controls are rotation browsing, click highlighted-track playback and hold shuffle. OLED FX/spectrum is a settings row. Reverb is a selectable FX with saved strength; pause and wait two seconds before power-off to save edits. ALBUM appears from tags or the parent folder, including before metadata loads.
+
+The latest build label is V6 R2 20261013 LOG:OFF. Use R2 controls and EQ/OLED settings rather than earlier brightness instructions above.
