@@ -215,3 +215,5 @@ For loss of clarity, compare FX disabled and bass/mid/treble 0 dB at the same vo
 Final E2 controls are rotation browsing, click highlighted-track playback and hold shuffle. OLED FX/spectrum is a settings row. Reverb is a selectable FX with saved strength; pause and wait two seconds before power-off to save edits. ALBUM appears from tags or the parent folder, including before metadata loads.
 
 The latest build label is V6 R2 20261013 LOG:OFF. Use R2 controls and EQ/OLED settings rather than earlier brightness instructions above.
+
+R3 uses artist/album/song folder navigation. Right/E2 click enters, left backs up. For lyrics, match the .lrc basename and select LYRICS under OLED VIEW. Artwork is optional baseline JPEG (folder or FLAC embedded); missing/unsupported art has no placeholder. Keep all bundled C/header files and see LYRICS_AND_ALBUMS.md for limits. Latest label: V6 R3 20261014 LOG:OFF.

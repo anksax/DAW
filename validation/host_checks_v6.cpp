@@ -202,7 +202,7 @@ uint8_t storedParam[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12,
 uint8_t storedMix[FX_COUNT] = {18, 18, 18, 18, 18, 18, 18, 18, 0, 18, 18, 25, 18, 12};
 uint16_t enabledFXMask = 0;
 int8_t eqDB[3] = {};
-int oledPage = 0; // FX or spectrum only
+int oledPage = 0; // FX, spectrum, lyrics
 bool mainSettingsOpen = false, mainFrameDirty = false, mainSettingsDirty = true;
 bool mainSettingsLayoutDirty = true;
 static constexpr int MAIN_SETTING_COUNT = 4;
@@ -1466,6 +1466,10 @@ void processVisualizerFrame() {
 
 
 
+#include "../DJ_Audio_Console_V6/LibraryBrowser.h"
+LibraryBrowser libraryBrowser;
+const char *hostPaths[]={"/Artist/Album/00.flac","/Artist/Album/01.flac","/Artist/Album/02.flac","/Artist/Album/03.flac","/Artist/Album/04.flac"};
+void resetSongs(){libraryBrowser.build(hostPaths,5);libraryBrowser.enter();libraryBrowser.enter();}
 int encoderMux=0;volatile int encoder1Edges=0,encoder2Edges=0;
 unsigned fakeMillis=2000;unsigned millis(){return fakeMillis;}
 enum PlayState {STOPPED,PLAYING,PAUSED};PlayState sharedPlayState=STOPPED;
@@ -1483,6 +1487,22 @@ int analogRead(int pin){return pin==JOY_X ? rawX : rawY;}
 bool playerReady=true;
 bool joyLatched=false;int trackCount=5,selectedTrack=0,playingTrack=-1;
 int previousCalls=0,playCalls=0;void playTrack(int index){++previousCalls;selectedTrack=index;}void playSelected(){++playCalls;}
+void browseLibrary(int delta) {
+  libraryBrowser.move(delta);int track=libraryBrowser.selectedTrack();
+  if (track>=0) selectedTrack=track;
+  browserDirty=true;if (playingTrack<0)playerDirty=true;
+}
+void selectLibraryItem() {
+  int play=libraryBrowser.enter();int track=libraryBrowser.selectedTrack();
+  if (track>=0)selectedTrack=track;
+  browserDirty=true;if (playingTrack<0)playerDirty=true;
+  if (play>=0)playSelected();
+}
+void backLibrary() {
+  libraryBrowser.back();int track=libraryBrowser.selectedTrack();
+  if (track>=0)selectedTrack=track;
+  browserDirty=true;if (playingTrack<0)playerDirty=true;
+}
 void previousTrack() {
   if (!trackCount) return;
   int current = playingTrack >= 0 ? playingTrack : selectedTrack;
@@ -1502,9 +1522,7 @@ void handleEncoders() {
   encoder1Edges %= 4; encoder2Edges %= 4;
   portEXIT_CRITICAL(&encoderMux);
   if (e2 && !mainSettingsOpen && trackCount) {
-    selectedTrack = (selectedTrack + e2 % (int)trackCount + trackCount) % trackCount;
-    browserDirty = true;
-    if (playingTrack < 0) playerDirty = true;
+    browseLibrary(e2);
   }
   if (!e1 || mainSettingsOpen || oledPage != 0) return;
   portENTER_CRITICAL(&fxMux);
@@ -1522,7 +1540,7 @@ void handleButtons() {
     changeFX(1); oledPage = 0; visualizerMode = false;
   }
   if (b2 == LONG_EVENT) { shuffleMode = !shuffleMode; playerDirty = true; }
-  if (!mainSettingsOpen && b2 == CLICK_EVENT) playSelected();
+  if (!mainSettingsOpen && b2 == CLICK_EVENT) selectLibraryItem();
   if (!mainSettingsOpen && b1 == LONG_EVENT) {
     portENTER_CRITICAL(&fxMux);
     uint16_t bit = 1U << fxMode;
@@ -1558,7 +1576,7 @@ void handleJoystick() {
     } else {
       int delta = dx > 0 ? 1 : -1;
       if (selectedSetting == 3) {
-        oledPage = delta > 0 ? 1 : 0; visualizerMode = oledPage == 1;
+        oledPage = (oledPage + delta + 3) % 3; visualizerMode = oledPage == 1;
       } else {
         portENTER_CRITICAL(&fxMux);
         int band = selectedSetting;
@@ -1646,61 +1664,9 @@ void handleJoystick() {
   joyLatched = true;
   repeatAt = millis() + (repeating ? 140 : 450);
 
-  // UP / DOWN
-
-  if (
-    abs(dy) >
-    abs(dx)
-  ) {
-
-    if (
-      dy > 0
-    ) {
-
-      selectedTrack++;
-
-    } else {
-
-      selectedTrack--;
-    }
-
-    if (
-      selectedTrack >=
-      trackCount
-    ) {
-
-      selectedTrack = 0;
-    }
-
-    if (
-      selectedTrack < 0
-    ) {
-
-      selectedTrack =
-        trackCount - 1;
-    }
-
-    DAW_LOG.printf("[JOY] browse raw=%d,%d selected=%d\n", x, y, selectedTrack);
-    browserDirty =
-      true;
-
-    if (playingTrack < 0) playerDirty = true;
-
-    return;
-  }
-
-  // LEFT / RIGHT
-
-  if (
-    dx < 0
-  ) {
-
-    previousTrack();
-
-  } else {
-
-    playSelected();
-  }
+  if (vertical) browseLibrary(dy>0 ? 1 : -1);
+  else if (dx<0) backLibrary();
+  else selectLibraryItem();
 }
 void loadFXSettings() {
   preferencesReady = fxPreferences.begin("daw-fx-v2", false);
@@ -1776,7 +1742,7 @@ using TFTCanvas=TFT;
 int transfers=0;
 struct Panel {void drawRGBBitmap(int,int,uint16_t*,int width,int rows){assert(!mutexHeld && width==240 && rows==8);++transfers;}} panel;
 void drawHeader(){assert(!mutexHeld);}void drawStaticCards(){assert(!mutexHeld);}void drawPlayer(){assert(!mutexHeld);++draws;}
-void drawBrowser(){assert(!mutexHeld);}void drawVolume(){assert(!mutexHeld);}void drawTimeline(){assert(!mutexHeld);}void drawMainSettings(){assert(!mutexHeld);}
+void drawBrowser(){assert(!mutexHeld);}void drawVolume(){assert(!mutexHeld);}void drawTimeline(){assert(!mutexHeld);}void drawAlbumName(){assert(!mutexHeld);}void drawMainSettings(){assert(!mutexHeld);}
 
 void renderTFT() {
   static uint32_t last = 0;
@@ -1794,9 +1760,10 @@ void renderTFT() {
     if (mainSettingsDirty) { drawMainSettings(); mainSettingsDirty = false; }
     return;
   }
-  static uint32_t lastTimeline = 0;
+  static uint32_t lastTimeline = 0, lastAlbumScroll = 0;
   if (playerDirty) { drawPlayer(); drawTimeline(); playerDirty = false; lastTimeline = millis(); }
   else if (millis() - lastTimeline >= 250) { drawTimeline(); lastTimeline = millis(); }
+  if (millis()-lastAlbumScroll>=450) {drawAlbumName();lastAlbumScroll=millis();}
   if (browserDirty) { drawBrowser(); browserDirty = false; }
   if (volumeDirty) { drawVolume(); volumeDirty = false; }
   fxDirty = false;
@@ -1819,7 +1786,7 @@ void serviceTFT() {
   if (held > maxDisplayHoldUs) maxDisplayHoldUs = held;
 }
 int main(){
- initTremoloLUT();initFFT();
+ initTremoloLUT();initFFT();resetSongs();
  fakeMillis+=100;playerDirty=true;audioBusy=true;renderTFT();assert(draws==1 && !playerDirty);
  tft.dirty=0;serviceTFT();assert(transfers==1 && tft.dirty==-1 && !mutexHeld);
  audioBusy=false;tft.dirty=1;serviceTFT();assert(transfers==2 && !mutexHeld);
@@ -1883,19 +1850,24 @@ int main(){
  int selection=selectedSetting;encoder1Edges=40;encoder2Edges=40;handleEncoders();assert(selectedSetting==selection && eqDB[0]==-12);
  enc1Button.event=CLICK_EVENT;handleButtons();assert(fxMode==FX_PHASER);
  int settingsPlayCalls=playCalls;enc2Button.event=CLICK_EVENT;handleButtons();assert(playCalls==settingsPlayCalls && !pauseCalls);
- selectedSetting=3;joy(1600,0);assert(oledPage==1 && visualizerMode);joy(-1600,0);assert(oledPage==0 && !visualizerMode);selectedSetting=selection;
+ selectedSetting=3;joy(1600,0);assert(oledPage==1 && visualizerMode);
+ joy(1600,0);assert(oledPage==2 && !visualizerMode);
+ joy(1600,0);assert(oledPage==0 && !visualizerMode);
+ joy(-1600,0);assert(oledPage==2 && !visualizerMode);
+ joy(1600,0);assert(oledPage==0);selectedSetting=selection;
  joyButton.event=CLICK_EVENT;handleButtons();assert(!mainSettingsOpen && !pauseCalls);
  fakeMillis+=100;handleJoystick();assert(!previousCalls); // exit whilst deflected must not skip a song.
  rawX=joyCenterX;rawY=joyCenterY;fakeMillis+=100;handleJoystick();assert(!joyLatched);
  joyButton.event=CLICK_EVENT;handleButtons();assert(pauseCalls==1);
  int beforeSelection=playCalls;enc2Button.event=CLICK_EVENT;handleButtons();assert(playCalls==beforeSelection+1 && !shuffleMode);
- playingTrack=-1;
+ playingTrack=-1;resetSongs();
  auto move=[&](int dx,int dy){rawX=2048;rawY=2048;fakeMillis+=30;handleJoystick();rawX+=dx;rawY+=dy;fakeMillis+=30;handleJoystick();};
  selectedTrack=0;move(0,1000);assert(selectedTrack==1);move(0,-1000);assert(selectedTrack==0);move(0,-1000);assert(selectedTrack==4);
- int beforePrevious=previousCalls;move(-1000,0);assert(previousCalls==beforePrevious+1 && selectedTrack==3);
- fakeMillis+=1000;handleJoystick();assert(previousCalls==beforePrevious+1);
- int beforePlay=playCalls;move(1000,0);assert(playCalls==beforePlay+1);
- selectedTrack=0;move(0,1000);assert(selectedTrack==1);
+ int beforePrevious=previousCalls;move(-1000,0);assert(previousCalls==beforePrevious && libraryBrowser.view()==LibraryBrowser::ALBUMS);
+ fakeMillis+=1000;handleJoystick();assert(libraryBrowser.view()==LibraryBrowser::ALBUMS);
+ int beforePlay=playCalls;move(1000,0);assert(playCalls==beforePlay && libraryBrowser.view()==LibraryBrowser::SONGS);
+ move(1000,0);assert(playCalls==beforePlay+1);
+ resetSongs();selectedTrack=0;move(0,1000);assert(selectedTrack==1);
  fakeMillis+=425;handleJoystick();assert(selectedTrack==1);
  fakeMillis+=25;handleJoystick();assert(selectedTrack==2);
  fakeMillis+=150;handleJoystick();assert(selectedTrack==3);

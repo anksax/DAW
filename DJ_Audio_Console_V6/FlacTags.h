@@ -98,3 +98,22 @@ inline void trackAlbumFolder(const char *path, char *out, size_t capacity) {
   if (length >= capacity) length = capacity - 1;
   memcpy(out, start, length); out[length] = 0; tagTrim(out);
 }
+
+
+inline void trackAlbumArtistFolder(const char *path, char *out, size_t capacity) {
+  if (!out || !capacity) return;
+  out[0]=0; if (!path) return;
+  const char *end=strrchr(path,'/'); if (!end || end==path) return;
+  while (end>path && end[-1]!='/') --end;
+  if (end<=path+1) return;
+  --end; const char *start=end;
+  while (start>path && start[-1]!='/') --start;
+  size_t length=(size_t)(end-start); if (length>=capacity) length=capacity-1;
+  memcpy(out,start,length); out[length]=0; tagTrim(out);
+}
+inline bool sameTrackAlbum(const char *a, const char *b) {
+  if (!a || !b) return false;
+  const char *ae=strrchr(a,'/'), *be=strrchr(b,'/');
+  size_t an=ae ? (size_t)(ae-a) : 0, bn=be ? (size_t)(be-b) : 0;
+  return an==bn && !memcmp(a,b,an);
+}

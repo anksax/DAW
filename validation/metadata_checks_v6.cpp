@@ -21,6 +21,10 @@ Reader make(const std::vector<std::string> &tags,bool picture=false){
 }
 int main(){
  char albumFolder[96];
+ trackAlbumArtistFolder("/Album Artist/Album/song.flac",albumFolder,sizeof(albumFolder));assert(!strcmp(albumFolder,"Album Artist"));
+ trackAlbumArtistFolder("/Album/song.flac",albumFolder,sizeof(albumFolder));assert(!albumFolder[0]);
+ trackAlbumArtistFolder("Artist/Album/song.flac",albumFolder,sizeof(albumFolder));assert(!strcmp(albumFolder,"Artist"));
+ assert(sameTrackAlbum("/A/Album/one.flac","/A/Album/two.flac"));assert(!sameTrackAlbum("/A/Album/one.flac","/B/Album/two.flac"));
  trackAlbumFolder("/Artist/Album Name/song.flac",albumFolder,sizeof(albumFolder));assert(!strcmp(albumFolder,"Album Name"));
  trackAlbumFolder("Album/song.flac",albumFolder,sizeof(albumFolder));assert(!strcmp(albumFolder,"Album"));
  trackAlbumFolder("/song.flac",albumFolder,sizeof(albumFolder));assert(!albumFolder[0]);

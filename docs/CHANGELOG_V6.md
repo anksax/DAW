@@ -63,3 +63,14 @@ Full local ESP32 compilation, PowerShell execution, physical uploads and listeni
 - Remove adjustable brightness, PWM setup and bright NVS reads/writes; fix TFT BL HIGH and OLED contrast to 255. Ignore old bright preferences without disturbing FX/EQ.
 - Normalize positive EQ boosts with preamp attenuation to reduce digital overload. Flat-EQ clean PCM remains unaffected; analog headphone/load distortion remains unverified.
 - Extend host checks for reverb tail/decay at 8/44.1/48/192 kHz, dry allocation-failure fallback, no processing allocations, old/new persistence, E2 mapping/OLED settings, held EQ adjustment, no brightness read/write, ALBUM/folder fallback and positive-EQ headroom. Listening, wiring and runtime memory/timing still require hardware tests.
+
+
+## R3: artist/album/song browser, lyrics and artwork
+
+- Sort canonical paths and build fixed-size folder group indices. Browse album artists → albums → songs with joystick or E2, retain parent selection on back, and keep browsing focus independent of EOF/playback changes. Joystick left is now back navigation, not previous-track playback.
+- Enlarge/scroll playing-card album names and add album heading/dividers. Fall back to the album-artist folder for song artist metadata. Equal album names under different artists remain separate groups.
+- Add a bounded, allocation-free LRC parser and PSRAM cue storage: timestamp fractions, repeated timestamps, metadata/offset, stable ordering, empty cues and UTF-8 truncation. Load matching .lrc/.LRC once at stopped track transitions. OLED VIEW cycles FX/SPECTRUM/LYRICS, with active two-row cues and previous/next preview, source-time pause/SLOW behavior and paging.
+- Add optional cached 56×56 folder JPEG or embedded FLAC front-cover JPEG, using the bundled attributed TJpgDec decoder. Check compressed-byte/dimension/metadata range bounds, preserve aspect ratio and omit failed/missing artwork without any placeholder/message. Allocate optional buffers once in PSRAM; do not read art during continuous playback.
+- Show V6 R3 20261014 LOG:OFF/ON. Add real-header hierarchy/LRC/JPEG tests, synthetic JPEG fixtures, malformed/truncated cases and folder identity checks. Keep physical blank-panel, USB disconnect and listening/timing acceptance open.
+
+- Rename the TFT header to THE DAW.
