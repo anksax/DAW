@@ -8,6 +8,7 @@ int main(){
   char display[128];tftReadableText(u8"Beyoncé – Jóga…",display,sizeof(display));assert(!strcmp(display,"Beyonce - Joga..."));
   tftReadableText(u8"Café / 中文",display,sizeof(display));assert(!strcmp(display,"Cafe / ??"));
   tftReadableText("bad\xe2\x82",display,sizeof(display));assert(!strcmp(display,"bad?"));
+  tftReadableText(u8"Ｃ\u2009Ｏ\u2009Ｎ T R O L",display,sizeof(display));assert(!strcmp(display,"C O N T R O L"));
   char tiny[2];tftReadableText(u8"Été",tiny,sizeof(tiny));assert(!strcmp(tiny,"E"));
 
  LrcEntry entries[256];LrcDocument doc;doc.setStorage(entries,256);

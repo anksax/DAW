@@ -23,7 +23,9 @@ inline size_t tftReadableText(const char *input,char *output,size_t capacity) {
     else if(cp>=32&&cp<=126)replacement=ascii;
     else if(cp<32||cp==127)replacement=" ";
     else if(cp>=0x300&&cp<=0x36f)replacement="";
-    else if(cp==0xa0)replacement=" ";
+    else if(cp==0xa0||(cp>=0x2000&&cp<=0x200a)||cp==0x202f||cp==0x205f||cp==0x3000)replacement=" ";
+    else if(cp>=0xff01&&cp<=0xff5e) {ascii[0]=(char)(cp-0xfee0);replacement=ascii;}
+    else if(cp==0xfeff||cp==0x200b)replacement="";
     else if(cp>=0xc0&&cp<=0xc5)replacement="A";
     else if(cp==0xc6)replacement="AE";
     else if(cp==0xc7)replacement="C";

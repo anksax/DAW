@@ -56,3 +56,5 @@ The player checks `cover.jpg`, `folder.jpg`, `cover.jpeg`, then `folder.jpeg` in
 Lyrics entries/file scratch space and the thumbnail add about **63 KiB PSRAM**; JPEG decoding uses a 4 KiB internal workspace, and folder grouping/path pointers add around 4 KiB on the ESP32. Keep OPI PSRAM enabled. Failed optional lyric/art allocations do not disable audio. Keep **all** sketch files together, including the bundled JPEG `.c`/headers—no additional JPEG library install is needed.
 
 TFT names are converted from UTF-8 to the classic font before clipping or scrolling: common Latin accents and punctuation use readable equivalents, combining accents are omitted, and unsupported codepoints use ?. Original metadata and file paths remain unchanged. Full Unicode TFT glyphs are not included.
+
+Intentional letter spacing is retained. Unicode spacing characters use ordinary spaces, and fullwidth ASCII letters use their normal-width equivalents.
