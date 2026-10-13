@@ -115,7 +115,7 @@ Click selects FX, rotation changes strength (0–25), hold toggles the selected 
 - DT: GPIO 40
 - switch: GPIO 47
 
-Click toggles shuffle; hold switches OLED FX/spectrum; rotation is unassigned.
+Click toggles shuffle; hold switches OLED FX/spectrum; rotation browses tracks.
 
 ### Joystick
 - X: GPIO 1
@@ -181,3 +181,6 @@ The present hardware is intentionally a single-deck embedded audio workstation. 
 
 
 V6 main-screen settings use joystick hold to enter/exit and joystick axes to select/adjust brightness and bass/mid/treble EQ. Joystick click exits settings or plays/pauses outside settings. TFT BL GPIO 21 must be connected to a controllable backlight input; a supply-tied BL cannot dim in software. Brightness also controls OLED contrast. See the README for the complete mapping and NVS save behavior.
+
+
+The TFT update revision requires 153,600 bytes of OPI PSRAM for its screen canvas. It lowers TFT SPI to 16 MHz and sends eight rows per transaction on the shared FSPI bus. Keep CS/DC/RST and power wiring short and secure; periodic redraw cannot correct loss of power, wiring faults or a controller stuck asleep.

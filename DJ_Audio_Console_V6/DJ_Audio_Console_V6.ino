@@ -11,7 +11,7 @@
   ENC1 rotate : selected effect strength
   ENC1 click  : next effect
   ENC1 long   : selected effect ON/OFF
-  ENC2 rotate : unused
+  ENC2 rotate : browse music library
   ENC2 click  : shuffle / sequential
   ENC2 long   : toggle FX / spectrum
   JOY up/down : select track
@@ -33,6 +33,7 @@
 */
 
 #include <Arduino.h>
+#include <atomic>
 #include <Preferences.h>
 #include <esp_system.h>
 #include <string.h>
@@ -48,6 +49,7 @@
 #include <freertos/semphr.h>
 #include <esp_heap_caps.h>
 
+#include "TFTCanvas.h"
 #include "FlacTags.h"
 #include "SerialDiagnostics.h"
 #include "AudioTools.h"
@@ -134,12 +136,14 @@ BestEffortSerialLog debugSerial(Serial, serialLogReady);
 
 SPIClass spi(FSPI);
 
-Adafruit_ST7789 tft(
+Adafruit_ST7789 panel(
   &spi,
   TFT_CS,
   TFT_DC,
   TFT_RST
 );
+
+TFTCanvas tft;
 
 U8G2_SH1106_128X64_NONAME_F_HW_I2C oled(
   U8G2_R0,
@@ -195,6 +199,7 @@ volatile bool rateChangePending = false;
 uint32_t rateChangedAt = 0;
 volatile int masterVolumePercent = 12;
 volatile uint32_t outputWaitUsTotal = 0, shortOutputWrites = 0;
+std::atomic<bool> uiSPIRequested{false};
 volatile uint32_t maxPipelineCpuUs = 0, maxPipelineFrames = 0, maxAudioCopyUs = 0, maxDisplayHoldUs = 0;
 static portMUX_TYPE timelineMux = portMUX_INITIALIZER_UNLOCKED;
 volatile uint64_t trackPCMBytes = 0, trackTotalFrames = 0;
@@ -1916,7 +1921,7 @@ void audioTask(void *param) {
       }
       // Blocking I2S writes already pace audio; don't add 2 ms per compressed chunk.
       // Periodic one-tick yield still lets the core-0 idle task service its watchdog.
-      if (millis() - lastIdleYield >= 10) { vTaskDelay(1); lastIdleYield = millis(); }
+      if (uiSPIRequested.load() || millis() - lastIdleYield >= 10) { vTaskDelay(1); lastIdleYield = millis(); }
       else taskYIELD();
     } else vTaskDelay(pdMS_TO_TICKS(2));
   }
@@ -2258,6 +2263,8 @@ void calibrateJoystick() {
 // ================================================================
 
 void handleJoystick() {
+  static uint32_t repeatAt = 0;
+  static bool mustRecenter = false;
   static bool settingsLatched = false, wasInSettings = false;
   if (mainSettingsOpen) {
     wasInSettings = true;
@@ -2284,7 +2291,7 @@ void handleJoystick() {
     mainSettingsDirty = true; return;
   }
   settingsLatched = false;
-  if (wasInSettings) { joyLatched = true; wasInSettings = false; }
+  if (wasInSettings) { joyLatched = true; mustRecenter = true; wasInSettings = false; }
 
   static uint32_t last = 0;
 
@@ -2332,18 +2339,15 @@ void handleJoystick() {
     JOY_DEADZONE
   ) {
 
-    joyLatched =
-      false;
+    joyLatched = false; mustRecenter = false; repeatAt = 0;
 
     return;
   }
 
-  if (
-    joyLatched
-  ) {
-
-    return;
-  }
+  bool vertical = abs(dy) > abs(dx) && abs(dy) >= JOY_TRIGGER;
+  if (mustRecenter) return;
+  if (joyLatched && (!vertical || (int32_t)(millis() - repeatAt) < 0)) return;
+  bool repeating = joyLatched;
 
   int largestAxis =
     abs(dx) >
@@ -2359,8 +2363,8 @@ void handleJoystick() {
     return;
   }
 
-  joyLatched =
-    true;
+  joyLatched = true;
+  repeatAt = millis() + (repeating ? 140 : 450);
 
   // UP / DOWN
 
@@ -2818,9 +2822,14 @@ void changeFX(int delta) {
 
 void handleEncoders() {
   portENTER_CRITICAL(&encoderMux);
-  int e1 = -(encoder1Edges / 4);
-  encoder1Edges %= 4; encoder2Edges %= 4; // E2 rotation has no assigned action.
+  int e1 = -(encoder1Edges / 4), e2 = encoder2Edges / 4;
+  encoder1Edges %= 4; encoder2Edges %= 4;
   portEXIT_CRITICAL(&encoderMux);
+  if (e2 && !mainSettingsOpen && trackCount) {
+    selectedTrack = (selectedTrack + e2 % (int)trackCount + trackCount) % trackCount;
+    browserDirty = true;
+    if (playingTrack < 0) playerDirty = true;
+  }
   if (!e1 || mainSettingsOpen || oledPage != 0) return;
   portENTER_CRITICAL(&fxMux);
   fxMix = constrain((int)fxMix + e1, 0, 25);
@@ -2960,6 +2969,11 @@ void decaySpectrum() {
 // ================================================================
 
 void renderOLED() {
+  if (!tft.getBuffer()) {
+    oled.clearBuffer(); oled.setFont(u8g2_font_5x7_tr);
+    oled.drawStr(0, 16, "TFT BUFFER FAILED"); oled.drawStr(0, 32, "CHECK OPI PSRAM");
+    oled.sendBuffer(); return;
+  }
   oled.clearBuffer(); oled.setFont(u8g2_font_5x7_tf);
   if (oledPage == 1) {
     oled.drawStr(0, 7, "PCM SPECTRUM");
@@ -3041,7 +3055,7 @@ const TrackTags *cachedTags(int index) {
   return nullptr;
 }
 void serviceTrackMetadata() {
-  if (!trackCount || mainSettingsOpen || !audioMutex) return;
+  if (!trackCount || mainSettingsOpen || !audioMutex || sharedPlayState == PLAYING) return;
   int first = constrain(selectedTrack - 1, 0, max(0, (int)trackCount - 3));
   int wanted[4] = {playingTrack >= 0 ? playingTrack : selectedTrack, first, first + 1, first + 2};
   for (int index : wanted) {
@@ -3059,7 +3073,7 @@ void serviceTrackMetadata() {
 }
 String displayArtist(int index) {
   const TrackTags *tags = cachedTags(index);
-  if (!tags) return "Reading artist...";
+  if (!tags) return sharedPlayState == PLAYING ? "Pause to read artist" : "Reading artist...";
   if (tags->artist[0]) return String(tags->artist);
   if (tags->albumArtist[0]) return String(tags->albumArtist);
   return "Artist unknown";
@@ -3186,7 +3200,7 @@ void drawMainSettings() {
   if (full) {
     tft.setTextSize(1); tft.setTextColor(C_MUTED);
     tft.setCursor(14, 40); tft.print("DISPLAY & SOUND");
-    tft.setCursor(14, 267); tft.print(DAW_SERIAL_DIAGNOSTICS ? "V6 20261010 LOG:ON" : "V6 20261010 LOG:OFF");
+    tft.setCursor(14, 267); tft.print(DAW_SERIAL_DIAGNOSTICS ? "V6 20261013 LOG:ON" : "V6 20261013 LOG:OFF");
     tft.setCursor(14, 282); tft.print("JOY UP/DOWN: SELECT");
     tft.setCursor(14, 298); tft.print("L/R ADJUST  CLICK BACK");
   }
@@ -3215,10 +3229,9 @@ void drawMainSettings() {
 
 void renderTFT() {
   static uint32_t last = 0;
-  if (millis() - last < 80) return;
+  if (!tft.getBuffer() || millis() - last < 20) return;
   last = millis();
-  if (audioMutex && xSemaphoreTake(audioMutex, 0) != pdTRUE) return;
-  uint32_t displayStarted = micros();
+  // RAM drawing never owns the audio/SD lock and cannot blank the physical TFT.
   if (mainFrameDirty) {
     tft.fillScreen(C_BG); drawHeader();
     if (!mainSettingsOpen) {
@@ -3228,9 +3241,6 @@ void renderTFT() {
   }
   if (mainSettingsOpen) {
     if (mainSettingsDirty) { drawMainSettings(); mainSettingsDirty = false; }
-    uint32_t held = micros() - displayStarted;
-    if (held > maxDisplayHoldUs) maxDisplayHoldUs = held;
-    if (audioMutex) xSemaphoreGive(audioMutex);
     return;
   }
   static uint32_t lastTimeline = 0;
@@ -3238,10 +3248,27 @@ void renderTFT() {
   else if (millis() - lastTimeline >= 250) { drawTimeline(); lastTimeline = millis(); }
   if (browserDirty) { drawBrowser(); browserDirty = false; }
   if (volumeDirty) { drawVolume(); volumeDirty = false; }
-  fxDirty = false; // OLED renders FX independently
+  fxDirty = false;
+}
+
+void serviceTFT() {
+  static uint32_t lastRepaint = 0;
+  if (!tft.getBuffer() || !audioMutex) { uiSPIRequested.store(false); return; }
+  // Refresh retained content without clearing the panel or resetting playback.
+  if (millis() - lastRepaint >= 5000) { tft.markAll(); lastRepaint = millis(); }
+  int stripe = tft.nextDirty();
+  if (stripe < 0) { uiSPIRequested.store(false); return; }
+  uiSPIRequested.store(true);
+  if (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(2)) != pdTRUE) return;
+  uint32_t displayStarted = micros();
+  int row = stripe * TFTCanvas::STRIPE_ROWS;
+  panel.drawRGBBitmap(0, row, tft.getBuffer() + row * TFTCanvas::WIDTH_PX,
+    TFTCanvas::WIDTH_PX, TFTCanvas::STRIPE_ROWS);
+  tft.sent(stripe);
+  uiSPIRequested.store(false);
   uint32_t held = micros() - displayStarted;
   if (held > maxDisplayHoldUs) maxDisplayHoldUs = held;
-  if (audioMutex) xSemaphoreGive(audioMutex);
+  xSemaphoreGive(audioMutex);
 }
 
 // ================================================================
@@ -3406,18 +3433,20 @@ void setup() {
 
   applyScreenBrightness();
 
-  tft.init(
+  tft.begin();
+  panel.init(
     240,
     320
   );
 
-  tft.setRotation(
+  panel.setRotation(
     0
   );
 
-  tft.invertDisplay(
+  panel.invertDisplay(
     false
   );
+  panel.setSPISpeed(16000000);
 
   // --------------------------------------------------------------
   // SD
@@ -4002,6 +4031,8 @@ void reportAudioFormat() {
 }
 
 void loop() {
+  // Sample input before diagnostic, display and metadata work.
+  handleEncoders(); handleButtons(); handleJoystick(); updateFader();
   reportAudioFormat();
   if (advancePending) {
     advancePending = false;
@@ -4015,16 +4046,9 @@ void loop() {
 
   processVisualizerFrame();
 
-  handleEncoders();
-
-  handleButtons();
-
-  handleJoystick();
-
-  updateFader();
-
   serviceTrackMetadata();
   renderTFT();
+  serviceTFT();
 
   static uint32_t lastOLED =
     0;

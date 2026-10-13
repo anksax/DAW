@@ -40,3 +40,15 @@ Native address/undefined-behavior checks pass, including all PCM effects, rapid 
 Supplied earlier runtime logs show 48 kHz / stereo / 24-bit FLAC decoded to PCM16, sequential EOF track 3 → 4, copy maxima around 208 ms during speed changes, and display holds around 90 ms. Zero short-write counts do not prove absence of DMA underruns. Those logs precede the latest edits and do not validate them.
 
 Full local ESP32 compilation, PowerShell execution, physical uploads and listening/USB-disconnect tests were unavailable. Arduino CI is configured to compile this revision; its actual result must be checked independently of the host checks. Do not mark this release stable until hardware acceptance passes.
+
+
+## 13 October: playback-time UI responsiveness and TFT refresh
+
+- Separate TFT composition into a 153,600-byte PSRAM canvas; no audio mutex is needed for RAM drawing. Allocate once, clip pixel/line writes and report failed OPI PSRAM allocation on OLED.
+- Transfer one dirty eight-row stripe at 16 MHz per loop under the shared audio/SD lock. Set an atomic pending request so audio yields between copies instead of repeatedly winning the mutex. Failed acquisition preserves dirty work. Round-robin selection prevents a frequently updated stripe from starving others.
+- Repaint retained content every five seconds without clearing or resetting the physical display. This may restore lost pixels; physical SPI/controller/power faults are not established or claimed fixed.
+- Poll controls first. Defer new SD metadata reads during playback; keep existing cached artists and show an explicit pause-to-read hint for uncached entries.
+- Add held vertical joystick repeat after 450 ms at 140 ms intervals; preserve one-shot horizontal actions and settings-exit neutral protection.
+- Assign encoder 2 rotation to wrapped library browsing; keep click shuffle and hold FX/spectrum.
+- Show V6 20261013 LOG:OFF/ON in settings. Extend actual-source host tests for RAM drawing during audio lock contention, stripe handoff/release/refresh, repeat behavior and E2 browsing; add actual-header canvas allocation/clipping/fairness stress tests.
+- Hardware acceptance remains pending; especially verify audio continuity under short SPI transfers, display recovery, joystick response and maximum-stack playback. PC serial-disconnect distortion remains open.

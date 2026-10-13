@@ -11,11 +11,11 @@ A standalone FLAC player and DJ-style audio console for the **ESP32-S3 N16R8**, 
 ## Quick start
 
 1. Install Arduino-ESP32 **3.3.12**, AudioTools, codec-libfoxenflac, Adafruit GFX, Adafruit ST7735 and ST7789 Library, and U8g2.
-2. Open **[DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino](DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino)**. Keep `FlacTags.h` and `SerialDiagnostics.h` in the same folder. The root V4 sketch is retained as a legacy reference.
+2. Open **[DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino](DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino)**. Keep `FlacTags.h`, `SerialDiagnostics.h` and `TFTCanvas.h` in the same folder. The root V4 sketch is retained as a legacy reference.
 3. Use ESP32S3 Dev Module, 16 MB flash, OPI PSRAM and the settings in [Board setup](docs/BOARD_SETUP.md). Wiring is in [Hardware](docs/HARDWARE.md).
 4. Put mono/stereo `.flac` files on microSD; nested folders are scanned. Source 24-bit FLAC is decoded into **16-bit PCM** for DSP/I2S. This is not a 24-bit output pipeline.
 5. Compile and upload. Joystick click starts the selected track; playback does not start automatically at boot. At EOF, playback advances automatically in sequence or shuffle mode.
-6. Hold the joystick to open settings and confirm the build label **V6 20261010 LOG:OFF**. This identifies the new firmware; a failed build/upload can leave the previous build installed.
+6. Hold the joystick to open settings and confirm the build label **V6 20261013 LOG:OFF**. This identifies the new firmware; a failed build/upload can leave the previous build installed.
 7. Serial diagnostics are **off by default**. For a capture, set `DAW_SERIAL_DIAGNOSTICS` to `1` in `SerialDiagnostics.h` and rebuild; use 115200 baud. Return it to `0` for normal use.
 
 For Windows, extract the complete project first. A simple path such as `C:\Arduino\DJ_Audio_Console_V6` avoids command-parser issues. See [Troubleshooting](docs/TROUBLESHOOTING.md).
@@ -29,8 +29,8 @@ For Windows, extract the complete project first. A simple path such as `C:\Ardui
 | Encoder 1 hold | Selected effect ON/OFF |
 | Encoder 2 click | Shuffle / sequential |
 | Encoder 2 hold | FX / spectrum page on OLED |
-| Encoder 2 rotate | Unassigned |
-| Joystick up/down | Browse tracks; return to neutral between steps |
+| Encoder 2 rotate | Browse tracks without changing the playing song |
+| Joystick up/down | Browse tracks; hold vertically to repeat after 450 ms |
 | Joystick right | Play selected track |
 | Joystick left | Previous playing track |
 | Joystick click | Play/pause/resume; exit settings when settings are open |
@@ -95,7 +95,13 @@ Host checks regenerate DSP/control tests from the sketch and run address/undefin
 
 - Closing Arduino IDE/Serial Monitor still produces distorted output on the user's board. The root cause is unconfirmed. Test standalone USB power and distinguish a reboot from an audio stall; see [Troubleshooting](docs/TROUBLESHOOTING.md).
 - Hardware confirmation is needed for joystick navigation, TFT brightness, rapid SLOW/vocoder changes, long playback, sample-rate changes and USB disconnects.
-- TFT and SD share SPI. UI/metadata work is synchronized with the audio task and dirty regions are redrawn, but measured display holds can still be substantial.
+- TFT and SD share SPI. UI drawing uses a 153,600-byte PSRAM canvas; only one 8-row stripe is transferred under the audio/SD lock per loop, at 16 MHz. The audio task yields to pending SPI UI work between copies. A five-second repaint restores retained pixels without clearing/resetting the panel. This is recovery for lost contents, not proof of a physical SPI/reset/power fix.
+- New tag reads are deferred while playing. Previously cached tags remain visible; uncached artists show a pause-to-read hint until playback pauses/stops.
 - No dual-deck mixing, recording, network metadata lookup, MP3, MIDI or pitch-preserving time stretching is implemented. Two-song mixing requires separate decoder/buffer paths and a mixer; it is not enabled by stacking effects.
 
 See [V6 changes](docs/CHANGELOG_V6.md), [development/testing](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md) and [license](LICENSE).
+
+
+### Playback/UI scheduling revision (13 October)
+
+The joystick and encoders are sampled first in the loop. Expensive TFT composition runs in PSRAM without acquiring the audio lock; short stripe transfers request a handoff between audio copies instead of polling once every 80 ms. Joystick vertical hold repeats every 140 ms after an initial 450 ms; horizontal play/previous actions stay one-shot, and exiting settings still requires neutral. Encoder 2 rotation browses the library; click/hold keep shuffle/visualizer. OPI PSRAM must be enabled; failed canvas allocation shows an OLED error and leaves audio usable. Physical timing and the random blank-panel symptom require board verification. These changes do not claim to fix the existing PC USB-disconnect distortion.

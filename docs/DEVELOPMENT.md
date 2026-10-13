@@ -23,3 +23,6 @@ For diagnostic captures enable `DAW_SERIAL_DIAGNOSTICS=1` in `SerialDiagnostics.
 USB-disconnect distortion remains open. Serial diagnostics being off has not resolved the user's report. Priorities are reproducing it with standalone power, verifying boot versus stall, measuring display/decode latency and reducing timing pressure before adding features.
 
 Future work includes seeking, queue/folder navigation, recording, MIDI, pitch-preserving time stretching and two-decoder mixing. None is implemented by V6.
+
+
+The 13 October revision uses a PSRAM TFT canvas and one 8-row SPI stripe per loop. Test that controls/browser update while playing, vertical joystick holds repeat, horizontal holds do not repeatedly restart tracks, canvas failure leaves audio/OLED diagnostic usable, and full screen changes never clear physical pixels before redraw. Measure [PERF] displayHoldMaxUs rather than assuming a hard timing limit from stripe size. Check continuous audio at 44.1/48/192 kHz with the maximum FX stack and visualizer; the actual scheduler/I2S behavior is not simulated by host tests. Uncached artist reads intentionally wait until pause/stop. Check random blank-panel recovery from five-second retained-content repainting; a reset/sleep/power fault may require separate hardware work.

@@ -3,6 +3,7 @@ ROOT = Path(__file__).resolve().parents[1]
 s = (ROOT / 'DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino').read_text()
 stub = r'''
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
