@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined(CONFIG_DISABLE_HAL_LOCKS) && CONFIG_DISABLE_HAL_LOCKS
+#error "Shared TFT/SD SPI requires Arduino HAL transaction locks"
+#endif
+
 // Include Adafruit_GFX and esp_heap_caps before this header. Only the UI task
 // owns these pixels; physical SPI transfers are performed separately.
 class TFTCanvas : public Adafruit_GFX {

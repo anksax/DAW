@@ -33,7 +33,6 @@
 */
 
 #include <Arduino.h>
-#include <atomic>
 #include <Preferences.h>
 #include <esp_system.h>
 #include <string.h>
@@ -199,7 +198,6 @@ volatile bool rateChangePending = false;
 uint32_t rateChangedAt = 0;
 volatile int masterVolumePercent = 12;
 volatile uint32_t outputWaitUsTotal = 0, shortOutputWrites = 0;
-std::atomic<bool> uiSPIRequested{false};
 volatile uint32_t maxPipelineCpuUs = 0, maxPipelineFrames = 0, maxAudioCopyUs = 0, maxDisplayHoldUs = 0;
 static portMUX_TYPE timelineMux = portMUX_INITIALIZER_UNLOCKED;
 volatile uint64_t trackPCMBytes = 0, trackTotalFrames = 0;
@@ -1921,7 +1919,7 @@ void audioTask(void *param) {
       }
       // Blocking I2S writes already pace audio; don't add 2 ms per compressed chunk.
       // Periodic one-tick yield still lets the core-0 idle task service its watchdog.
-      if (uiSPIRequested.load() || millis() - lastIdleYield >= 10) { vTaskDelay(1); lastIdleYield = millis(); }
+      if (millis() - lastIdleYield >= 10) { vTaskDelay(1); lastIdleYield = millis(); }
       else taskYIELD();
     } else vTaskDelay(pdMS_TO_TICKS(2));
   }
@@ -3253,22 +3251,20 @@ void renderTFT() {
 
 void serviceTFT() {
   static uint32_t lastRepaint = 0;
-  if (!tft.getBuffer() || !audioMutex) { uiSPIRequested.store(false); return; }
+  if (!tft.getBuffer()) return;
   // Refresh retained content without clearing the panel or resetting playback.
   if (millis() - lastRepaint >= 5000) { tft.markAll(); lastRepaint = millis(); }
   int stripe = tft.nextDirty();
-  if (stripe < 0) { uiSPIRequested.store(false); return; }
-  uiSPIRequested.store(true);
-  if (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(2)) != pdTRUE) return;
+  if (stripe < 0) return;
   uint32_t displayStarted = micros();
   int row = stripe * TFTCanvas::STRIPE_ROWS;
+  // Both Arduino SD and Adafruit hardware SPI use this same SPIClass transaction
+  // mutex. Do not wait for the whole decoder/I2S copy via audioMutex here.
   panel.drawRGBBitmap(0, row, tft.getBuffer() + row * TFTCanvas::WIDTH_PX,
     TFTCanvas::WIDTH_PX, TFTCanvas::STRIPE_ROWS);
   tft.sent(stripe);
-  uiSPIRequested.store(false);
   uint32_t held = micros() - displayStarted;
   if (held > maxDisplayHoldUs) maxDisplayHoldUs = held;
-  xSemaphoreGive(audioMutex);
 }
 
 // ================================================================

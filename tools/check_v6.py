@@ -34,15 +34,15 @@ bool joyLatched=false;int trackCount=5,selectedTrack=0,playingTrack=-1;
 int previousCalls=0,playCalls=0;void playTrack(int index){++previousCalls;selectedTrack=index;}void playSelected(){++playCalls;}
 '''
 prefix+='\n'.join(extract(x) for x in ['void previousTrack()', 'void changeFX(int delta)','void handleEncoders()', 'void handleButtons()', 'void handleJoystick()', 'void loadFXSettings()', 'void saveFXSettingsWhenIdle()', 'void servicePlaybackRate()'])
-prefix += '\nint draws=0;const int C_BG=0;\nint pdMS_TO_TICKS(int ms){return ms;}\nstruct TFT {\n static constexpr int WIDTH_PX=240,STRIPE_ROWS=8;\n uint16_t pixels[240*320]={};bool ready=true;int dirty=-1,sentCount=0;\n uint16_t *getBuffer(){return ready?pixels:nullptr;}\n void fillScreen(int){assert(!mutexHeld);dirty=0;}\n void markAll(){dirty=0;}\n int nextDirty(){return dirty;}\n void sent(int stripe){assert(mutexHeld && stripe==dirty);dirty=-1;++sentCount;}\n} tft;\nusing TFTCanvas=TFT;\nint transfers=0;\nstruct Panel {void drawRGBBitmap(int,int,uint16_t*,int width,int rows){assert(mutexHeld && width==240 && rows==8);++transfers;}} panel;\nvoid drawHeader(){assert(!mutexHeld);}void drawStaticCards(){assert(!mutexHeld);}void drawPlayer(){assert(!mutexHeld);++draws;}\nvoid drawBrowser(){assert(!mutexHeld);}void drawVolume(){assert(!mutexHeld);}void drawTimeline(){assert(!mutexHeld);}void drawMainSettings(){assert(!mutexHeld);}\n'
+prefix += '\nint draws=0;const int C_BG=0;\nint pdMS_TO_TICKS(int ms){return ms;}\nstruct TFT {\n static constexpr int WIDTH_PX=240,STRIPE_ROWS=8;\n uint16_t pixels[240*320]={};bool ready=true;int dirty=-1,sentCount=0;\n uint16_t *getBuffer(){return ready?pixels:nullptr;}\n void fillScreen(int){assert(!mutexHeld);dirty=0;}\n void markAll(){dirty=0;}\n int nextDirty(){return dirty;}\n void sent(int stripe){assert(!mutexHeld && stripe==dirty);dirty=-1;++sentCount;}\n} tft;\nusing TFTCanvas=TFT;\nint transfers=0;\nstruct Panel {void drawRGBBitmap(int,int,uint16_t*,int width,int rows){assert(!mutexHeld && width==240 && rows==8);++transfers;}} panel;\nvoid drawHeader(){assert(!mutexHeld);}void drawStaticCards(){assert(!mutexHeld);}void drawPlayer(){assert(!mutexHeld);++draws;}\nvoid drawBrowser(){assert(!mutexHeld);}void drawVolume(){assert(!mutexHeld);}void drawTimeline(){assert(!mutexHeld);}void drawMainSettings(){assert(!mutexHeld);}\n'
 prefix += '\n' + extract('void renderTFT()') + '\n' + extract('void serviceTFT()')
 tests=r'''
  initTremoloLUT();initFFT();
  fakeMillis+=100;playerDirty=true;audioBusy=true;renderTFT();assert(draws==1 && !playerDirty);
- tft.dirty=0;serviceTFT();assert(transfers==0 && uiSPIRequested.load() && tft.dirty==0);
- audioBusy=false;serviceTFT();assert(transfers==1 && !uiSPIRequested.load() && !mutexHeld);
- tft.ready=false;uiSPIRequested.store(true);serviceTFT();assert(!uiSPIRequested.load());tft.ready=true;
- fakeMillis+=5000;serviceTFT();assert(transfers==2 && !mutexHeld);
+ tft.dirty=0;serviceTFT();assert(transfers==1 && tft.dirty==-1 && !mutexHeld);
+ audioBusy=false;tft.dirty=1;serviceTFT();assert(transfers==2 && !mutexHeld);
+ tft.ready=false;serviceTFT();assert(transfers==2);tft.ready=true;
+ fakeMillis+=5000;serviceTFT();assert(transfers==3 && !mutexHeld);
  fakeMillis+=100;audioBusy=false;renderTFT();assert(draws==1 && !mutexHeld);
  mainSettingsOpen=true;mainSettingsDirty=true;fakeMillis+=100;renderTFT();assert(!mutexHeld);mainSettingsOpen=false;
  {
@@ -68,7 +68,7 @@ tests=r'''
   assert(allocations==before);
  }
  enabledFXMask=0;++fxRevision;DJFXEffect::prepareAll();masterVolumePercent=12;
- std::cout<<"PASS: TFT RAM redraw while audio busy, bounded stripe defer/handoff/release, periodic repaint, partial-output retry without PCM loss, five-ms stage fades, high-rate chorus stress\n";
+ std::cout<<"PASS: TFT RAM redraw while audio busy, short stripe transfers independent of decoder/I2S lock, periodic repaint, partial-output retry without PCM loss, five-ms stage fades, high-rate chorus stress\n";
 
  fxMode=FX_FILTER;fxMix=storedMix[fxMode];
  enc1Button.event=CLICK_EVENT;handleButtons();assert(fxMode==FX_ECHO && !visualizerMode);

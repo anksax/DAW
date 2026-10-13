@@ -201,6 +201,6 @@ Include:
 
 ## TFT sluggish only while playing / randomly blank with backlight lit
 
-The 13 October build draws in a PSRAM canvas and queues short SPI stripes, giving pending UI work a handoff between audio copies. It samples controls before drawing and delays new metadata reads until pause/stop. Encoder 2 rotation can browse; held joystick up/down repeats. Check settings for V6 20261013 LOG:OFF and confirm OPI PSRAM is enabled. A failed canvas allocation reports TFT BUFFER FAILED / CHECK OPI PSRAM on OLED.
+The 13 October build draws in a PSRAM canvas and queues short SPI stripes, using the driver SPI transaction lock instead of waiting behind the whole audio copy. It samples controls before drawing and delays new metadata reads until pause/stop. Encoder 2 rotation can browse; held joystick up/down repeats. Check settings for V6 20261013 LOG:OFF and confirm OPI PSRAM is enabled. A failed canvas allocation reports TFT BUFFER FAILED / CHECK OPI PSRAM on OLED.
 
 A retained-content repaint occurs every five seconds. If the panel remains blank while the OLED/transport respond, collect the physical TFT CS/DC/RST and power wiring details. No display readback is available to prove whether the controller reset or slept; neither backlight being on nor successful compilation proves the panel's data connection. Do not erase flash/NVS as a first response to this symptom.

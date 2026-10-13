@@ -1,6 +1,5 @@
 
 #include <algorithm>
-#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -76,7 +75,6 @@ volatile bool rateChangePending = false;
 uint32_t rateChangedAt = 0;
 volatile int masterVolumePercent = 12;
 volatile uint32_t outputWaitUsTotal = 0, shortOutputWrites = 0;
-std::atomic<bool> uiSPIRequested{false};
 volatile uint32_t maxPipelineCpuUs = 0, maxPipelineFrames = 0, maxAudioCopyUs = 0, maxDisplayHoldUs = 0;
 static portMUX_TYPE timelineMux = portMUX_INITIALIZER_UNLOCKED;
 volatile uint64_t trackPCMBytes = 0, trackTotalFrames = 0;
@@ -1730,11 +1728,11 @@ struct TFT {
  void fillScreen(int){assert(!mutexHeld);dirty=0;}
  void markAll(){dirty=0;}
  int nextDirty(){return dirty;}
- void sent(int stripe){assert(mutexHeld && stripe==dirty);dirty=-1;++sentCount;}
+ void sent(int stripe){assert(!mutexHeld && stripe==dirty);dirty=-1;++sentCount;}
 } tft;
 using TFTCanvas=TFT;
 int transfers=0;
-struct Panel {void drawRGBBitmap(int,int,uint16_t*,int width,int rows){assert(mutexHeld && width==240 && rows==8);++transfers;}} panel;
+struct Panel {void drawRGBBitmap(int,int,uint16_t*,int width,int rows){assert(!mutexHeld && width==240 && rows==8);++transfers;}} panel;
 void drawHeader(){assert(!mutexHeld);}void drawStaticCards(){assert(!mutexHeld);}void drawPlayer(){assert(!mutexHeld);++draws;}
 void drawBrowser(){assert(!mutexHeld);}void drawVolume(){assert(!mutexHeld);}void drawTimeline(){assert(!mutexHeld);}void drawMainSettings(){assert(!mutexHeld);}
 
@@ -1763,30 +1761,28 @@ void renderTFT() {
 }
 void serviceTFT() {
   static uint32_t lastRepaint = 0;
-  if (!tft.getBuffer() || !audioMutex) { uiSPIRequested.store(false); return; }
+  if (!tft.getBuffer()) return;
   // Refresh retained content without clearing the panel or resetting playback.
   if (millis() - lastRepaint >= 5000) { tft.markAll(); lastRepaint = millis(); }
   int stripe = tft.nextDirty();
-  if (stripe < 0) { uiSPIRequested.store(false); return; }
-  uiSPIRequested.store(true);
-  if (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(2)) != pdTRUE) return;
+  if (stripe < 0) return;
   uint32_t displayStarted = micros();
   int row = stripe * TFTCanvas::STRIPE_ROWS;
+  // Both Arduino SD and Adafruit hardware SPI use this same SPIClass transaction
+  // mutex. Do not wait for the whole decoder/I2S copy via audioMutex here.
   panel.drawRGBBitmap(0, row, tft.getBuffer() + row * TFTCanvas::WIDTH_PX,
     TFTCanvas::WIDTH_PX, TFTCanvas::STRIPE_ROWS);
   tft.sent(stripe);
-  uiSPIRequested.store(false);
   uint32_t held = micros() - displayStarted;
   if (held > maxDisplayHoldUs) maxDisplayHoldUs = held;
-  xSemaphoreGive(audioMutex);
 }
 int main(){
  initTremoloLUT();initFFT();
  fakeMillis+=100;playerDirty=true;audioBusy=true;renderTFT();assert(draws==1 && !playerDirty);
- tft.dirty=0;serviceTFT();assert(transfers==0 && uiSPIRequested.load() && tft.dirty==0);
- audioBusy=false;serviceTFT();assert(transfers==1 && !uiSPIRequested.load() && !mutexHeld);
- tft.ready=false;uiSPIRequested.store(true);serviceTFT();assert(!uiSPIRequested.load());tft.ready=true;
- fakeMillis+=5000;serviceTFT();assert(transfers==2 && !mutexHeld);
+ tft.dirty=0;serviceTFT();assert(transfers==1 && tft.dirty==-1 && !mutexHeld);
+ audioBusy=false;tft.dirty=1;serviceTFT();assert(transfers==2 && !mutexHeld);
+ tft.ready=false;serviceTFT();assert(transfers==2);tft.ready=true;
+ fakeMillis+=5000;serviceTFT();assert(transfers==3 && !mutexHeld);
  fakeMillis+=100;audioBusy=false;renderTFT();assert(draws==1 && !mutexHeld);
  mainSettingsOpen=true;mainSettingsDirty=true;fakeMillis+=100;renderTFT();assert(!mutexHeld);mainSettingsOpen=false;
  {
@@ -1812,7 +1808,7 @@ int main(){
   assert(allocations==before);
  }
  enabledFXMask=0;++fxRevision;DJFXEffect::prepareAll();masterVolumePercent=12;
- std::cout<<"PASS: TFT RAM redraw while audio busy, bounded stripe defer/handoff/release, periodic repaint, partial-output retry without PCM loss, five-ms stage fades, high-rate chorus stress\n";
+ std::cout<<"PASS: TFT RAM redraw while audio busy, short stripe transfers independent of decoder/I2S lock, periodic repaint, partial-output retry without PCM loss, five-ms stage fades, high-rate chorus stress\n";
 
  fxMode=FX_FILTER;fxMix=storedMix[fxMode];
  enc1Button.event=CLICK_EVENT;handleButtons();assert(fxMode==FX_ECHO && !visualizerMode);
