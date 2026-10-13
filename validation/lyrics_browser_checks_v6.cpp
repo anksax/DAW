@@ -1,9 +1,15 @@
+#include "../DJ_Audio_Console_V6/DisplayText.h"
 #include "../DJ_Audio_Console_V6/LrcLyrics.h"
 #include "../DJ_Audio_Console_V6/LibraryBrowser.h"
 #include <cassert>
 #include <string>
 #include <iostream>
 int main(){
+  char display[128];tftReadableText(u8"Beyoncé – Jóga…",display,sizeof(display));assert(!strcmp(display,"Beyonce - Joga..."));
+  tftReadableText(u8"Café / 中文",display,sizeof(display));assert(!strcmp(display,"Cafe / ??"));
+  tftReadableText("bad\xe2\x82",display,sizeof(display));assert(!strcmp(display,"bad?"));
+  char tiny[2];tftReadableText(u8"Été",tiny,sizeof(tiny));assert(!strcmp(tiny,"E"));
+
  LrcEntry entries[256];LrcDocument doc;doc.setStorage(entries,256);
  std::string text="\xef\xbb\xbf[ti:Test]\r\n[00:20.000][00:01.50]Repeated\r\n[00:05]Second\n[00:10.1]\n[offset:+200]\n";
  assert(doc.parse(text.data(),text.size())&&doc.size()==4);

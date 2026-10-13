@@ -74,3 +74,5 @@ Full local ESP32 compilation, PowerShell execution, physical uploads and listeni
 - Show V6 R3 20261014 LOG:OFF/ON. Add real-header hierarchy/LRC/JPEG tests, synthetic JPEG fixtures, malformed/truncated cases and folder identity checks. Keep physical blank-panel, USB disconnect and listening/timing acceptance open.
 
 - Rename the TFT header to THE DAW.
+
+TFT names are converted from UTF-8 to the classic font before clipping or scrolling: common Latin accents and punctuation use readable equivalents, combining accents are omitted, and unsupported codepoints use ?. Original metadata and file paths remain unchanged. Full Unicode TFT glyphs are not included.

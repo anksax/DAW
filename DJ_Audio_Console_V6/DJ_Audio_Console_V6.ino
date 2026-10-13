@@ -53,6 +53,7 @@
 #include "LrcLyrics.h"
 #include "LibraryBrowser.h"
 #include "AlbumCover.h"
+#include "DisplayText.h"
 #include "SerialDiagnostics.h"
 #include "AudioTools.h"
 #include "AudioTools/Disk/AudioSourceSD.h"
@@ -3165,31 +3166,35 @@ void serviceTrackMetadata() {
     return; // One file per UI iteration; don't scan the whole SD during playback.
   }
 }
+String readableName(const String &text) {
+  char output[384];tftReadableText(text.c_str(),output,sizeof(output));return String(output);
+}
+
 String displayArtist(int index) {
   if (index<0 || index>=trackCount) return "Artist unknown";
   const TrackTags *tags = cachedTags(index);
-  if (tags && tags->artist[0]) return String(tags->artist);
-  if (tags && tags->albumArtist[0]) return String(tags->albumArtist);
+  if (tags && tags->artist[0]) return readableName(String(tags->artist));
+  if (tags && tags->albumArtist[0]) return readableName(String(tags->albumArtist));
   char folder[96]; trackAlbumArtistFolder(tracks[index].path.c_str(),folder,sizeof(folder));
-  if (folder[0]) return String(folder);
+  if (folder[0]) return readableName(String(folder));
   return tags ? "Artist unknown" : sharedPlayState==PLAYING ? "Pause to read artist" : "Reading artist...";
 }
 
 String displayAlbum(int index) {
   if (index < 0 || index >= trackCount) return "Album unknown";
   const TrackTags *tags = cachedTags(index);
-  if (tags && tags->album[0]) return String(tags->album);
+  if (tags && tags->album[0]) return readableName(String(tags->album));
   char folder[96]; trackAlbumFolder(tracks[index].path.c_str(), folder, sizeof(folder));
-  return folder[0] ? String(folder) : String("Album unknown");
+  return folder[0] ? readableName(String(folder)) : String("Album unknown");
 }
 
 String displayTrackName(int index) {
   if (index < 0 || index >= trackCount) return "NO TRACK";
   const TrackTags *tags = cachedTags(index);
-  if (tags && tags->title[0]) return String(tags->title);
+  if (tags && tags->title[0]) return readableName(String(tags->title));
   String text = tracks[index].name;
   if (text.endsWith(".flac") || text.endsWith(".FLAC")) text = text.substring(0, text.length() - 5);
-  return text;
+  return readableName(text);
 }
 
 void drawTimeline() {
@@ -3260,7 +3265,7 @@ void drawPlayer() {
 String folderArtistName(int index) {
   if (index<0 || index>=trackCount)return "Album artist unknown";
   char name[96];trackAlbumArtistFolder(tracks[index].path.c_str(),name,sizeof(name));
-  return name[0] ? String(name) : String("Album artist unknown");
+  return name[0] ? readableName(String(name)) : String("Album artist unknown");
 }
 
 void drawBrowser() {
