@@ -40,3 +40,39 @@ Native address/undefined-behavior checks pass, including all PCM effects, rapid 
 Supplied earlier runtime logs show 48 kHz / stereo / 24-bit FLAC decoded to PCM16, sequential EOF track 3 → 4, copy maxima around 208 ms during speed changes, and display holds around 90 ms. Zero short-write counts do not prove absence of DMA underruns. Those logs precede the latest edits and do not validate them.
 
 Full local ESP32 compilation, PowerShell execution, physical uploads and listening/USB-disconnect tests were unavailable. Arduino CI is configured to compile this revision; its actual result must be checked independently of the host checks. Do not mark this release stable until hardware acceptance passes.
+
+
+## 13 October: playback-time UI responsiveness and TFT refresh
+
+- Separate TFT composition into a 153,600-byte PSRAM canvas; no audio mutex is needed for RAM drawing. Allocate once, clip pixel/line writes and report failed OPI PSRAM allocation on OLED.
+- Transfer one dirty eight-row stripe at 16 MHz per loop using the existing SPIClass transaction mutex shared by Arduino SD and Adafruit hardware SPI. Remove the decoder/I2S audio-mutex gate from display transfers, so blocked I2S writes no longer block the screen. Standard HAL SPI locks are required; the header rejects builds that disable them. Round-robin selection prevents a frequently updated stripe from starving others.
+- Repaint retained content every five seconds without clearing or resetting the physical display. This may restore lost pixels; physical SPI/controller/power faults are not established or claimed fixed.
+- Poll controls first. Defer new SD metadata reads during playback; keep existing cached artists and show an explicit pause-to-read hint for uncached entries.
+- Add held vertical joystick repeat after 450 ms at 140 ms intervals; preserve one-shot horizontal actions and settings-exit neutral protection.
+- Assign encoder 2 rotation to wrapped library browsing; keep click shuffle and hold FX/spectrum.
+- Show V6 20261013 LOG:OFF/ON in settings. Extend actual-source host tests for RAM drawing during audio lock contention, SPI transfer independence/refresh, repeat behavior and E2 browsing; add actual-header canvas allocation/clipping/fairness stress tests.
+- Hardware acceptance remains pending; especially verify audio continuity under short SPI transfers, display recovery, joystick response and maximum-stack playback. PC serial-disconnect distortion remains open.
+
+
+## R2: reverb, album and final E2 mapping
+
+- Append REVERB as persisted FX ID 13; add four damped combs/two all-pass diffusers, fixed startup internal-RAM allocation, bounded lengths/feedback, output headroom and dry fallback on allocation failure. It keeps independent saved strength and the existing per-stage enable/three-PCM-stage cap. Accept old 26-byte strength/parameter records alongside 16/18/new 28-byte records.
+- Final E2 mapping: rotate library, click play highlighted song, hold shuffle. Move OLED FX/spectrum selection into main settings; preserve E1 stage controls and joystick play/pause.
+- Add ALBUM tag parsing and parent-folder fallback, with album text in playing card and selected-album library header. Existing cache/deferred reads and bounded UTF-8 handling remain.
+- Held settings adjustments repeat after 350 ms at 100 ms intervals. Main settings now have bass/mid/treble and OLED view; show V6 R2 20261013 LOG:OFF/ON.
+- Remove adjustable brightness, PWM setup and bright NVS reads/writes; fix TFT BL HIGH and OLED contrast to 255. Ignore old bright preferences without disturbing FX/EQ.
+- Normalize positive EQ boosts with preamp attenuation to reduce digital overload. Flat-EQ clean PCM remains unaffected; analog headphone/load distortion remains unverified.
+- Extend host checks for reverb tail/decay at 8/44.1/48/192 kHz, dry allocation-failure fallback, no processing allocations, old/new persistence, E2 mapping/OLED settings, held EQ adjustment, no brightness read/write, ALBUM/folder fallback and positive-EQ headroom. Listening, wiring and runtime memory/timing still require hardware tests.
+
+
+## R3: artist/album/song browser, lyrics and artwork
+
+- Sort canonical paths and build fixed-size folder group indices. Browse album artists → albums → songs with joystick or E2, retain parent selection on back, and keep browsing focus independent of EOF/playback changes. Joystick left is now back navigation, not previous-track playback.
+- Enlarge/scroll playing-card album names and add album heading/dividers. Fall back to the album-artist folder for song artist metadata. Equal album names under different artists remain separate groups.
+- Add a bounded, allocation-free LRC parser and PSRAM cue storage: timestamp fractions, repeated timestamps, metadata/offset, stable ordering, empty cues and UTF-8 truncation. Load matching .lrc/.LRC once at stopped track transitions. OLED VIEW cycles FX/SPECTRUM/LYRICS, with active two-row cues and previous/next preview, source-time pause/SLOW behavior and paging.
+- Add optional cached 56×56 folder JPEG or embedded FLAC front-cover JPEG, using the bundled attributed TJpgDec decoder. Check compressed-byte/dimension/metadata range bounds, preserve aspect ratio and omit failed/missing artwork without any placeholder/message. Allocate optional buffers once in PSRAM; do not read art during continuous playback.
+- Show V6 R3 20261014 LOG:OFF/ON. Add real-header hierarchy/LRC/JPEG tests, synthetic JPEG fixtures, malformed/truncated cases and folder identity checks. Keep physical blank-panel, USB disconnect and listening/timing acceptance open.
+
+- Rename the TFT header to THE DAW.
+
+TFT names are converted from UTF-8 to the classic font before clipping or scrolling: common Latin accents and punctuation use readable equivalents, combining accents are omitted, and unsupported codepoints use ?. Original metadata and file paths remain unchanged. Full Unicode TFT glyphs are not included.

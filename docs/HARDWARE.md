@@ -115,7 +115,7 @@ Click selects FX, rotation changes strength (0–25), hold toggles the selected 
 - DT: GPIO 40
 - switch: GPIO 47
 
-Click toggles shuffle; hold switches OLED FX/spectrum; rotation is unassigned.
+Click enters the highlighted folder or plays the highlighted song; hold toggles shuffle; rotation browses the current artist/album/song level. OLED view is selected in main settings.
 
 ### Joystick
 - X: GPIO 1
@@ -180,4 +180,12 @@ Before debugging software, verify:
 The present hardware is intentionally a single-deck embedded audio workstation. Multi-deck audio, recording inputs, MIDI hardware, balanced outputs and custom PCB integration are future expansion areas.
 
 
-V6 main-screen settings use joystick hold to enter/exit and joystick axes to select/adjust brightness and bass/mid/treble EQ. Joystick click exits settings or plays/pauses outside settings. TFT BL GPIO 21 must be connected to a controllable backlight input; a supply-tied BL cannot dim in software. Brightness also controls OLED contrast. See the README for the complete mapping and NVS save behavior.
+V6 main-screen settings use joystick hold to enter/exit and joystick axes to select/adjust bass/mid/treble EQ and OLED view. Joystick click exits settings or plays/pauses outside settings. TFT BL GPIO 21 is held HIGH; OLED contrast is fixed at 255. Brightness adjustment is removed. See the README for the complete mapping and NVS save behavior.
+
+
+The TFT update revision requires 153,600 bytes of OPI PSRAM for its screen canvas. It lowers TFT SPI to 16 MHz and sends eight rows per transaction on the shared FSPI bus. Keep CS/DC/RST and power wiring short and secure; periodic redraw cannot correct loss of power, wiring faults or a controller stuck asleep.
+
+
+R2 reverb reserves about 51.75 KiB additional internal RAM across prototype and stereo clones. OPI PSRAM still holds the TFT canvas. Brightness adjustment is removed; TFT BL is held HIGH and OLED contrast fixed at 255. PCM5102A modules provide line output; TI specifies minimum 1 kOhm load per output. A headphone amplifier is needed for lower-impedance headphones. https://www.ti.com/lit/ds/symlink/pcm5102a.pdf
+
+Current R3 control mapping: E2 rotate browses the current level, click enters a folder or plays the highlighted song, hold toggles shuffle. Joystick left returns to the parent level and right enters/selects. OLED view is selected in main settings.

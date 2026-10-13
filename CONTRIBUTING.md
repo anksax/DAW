@@ -38,7 +38,7 @@ Required libraries:
 2. Install the ESP32 Arduino core and libraries above.
 3. Select **ESP32S3 Dev Module**.
 4. Apply the board configuration documented in `README.md`.
-5. Compile `DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino`; keep both local headers beside it.
+5. Compile `DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino`; keep all bundled local headers and C files beside it.
 6. Test on hardware with a known-good 16-bit mono/stereo FLAC.
 
 ## What to test

@@ -7,6 +7,7 @@ struct TrackTags {
   char title[96] = {};
   char artist[96] = {};
   char albumArtist[96] = {};
+  char album[96] = {};
 };
 
 // Reader implements File's read(uint8_t*,size_t), position(), size(), seek().
@@ -49,7 +50,7 @@ template<class Reader> bool readTagComments(Reader &f, uint32_t end, TrackTags &
     char key[33];
     for (size_t k = 0; k < equals; ++k) key[k] = prefix[k] >= 'a' && prefix[k] <= 'z' ? prefix[k] - 'a' + 'A' : prefix[k];
     key[equals] = 0;
-    char *destination = !strcmp(key, "TITLE") ? tags.title : !strcmp(key, "ARTIST") ? tags.artist :
+    char *destination = !strcmp(key, "TITLE") ? tags.title : !strcmp(key, "ARTIST") ? tags.artist : !strcmp(key, "ALBUM") ? tags.album :
       (!strcmp(key, "ALBUMARTIST") || !strcmp(key, "ALBUM ARTIST")) ? tags.albumArtist : nullptr;
     if (!destination) continue;
     size_t offset = strlen(destination);
@@ -82,4 +83,37 @@ template<class Reader> bool readFLACTextTags(Reader &f, TrackTags &out) {
     if (h[0] & 128) { out = parsed; return true; }
   }
   return false;
+}
+
+
+inline void trackAlbumFolder(const char *path, char *out, size_t capacity) {
+  if (!out || !capacity) return;
+  out[0] = 0;
+  if (!path) return;
+  const char *end = strrchr(path, '/');
+  if (!end || end == path) return;
+  const char *start = end;
+  while (start > path && start[-1] != '/') --start;
+  size_t length = (size_t)(end - start);
+  if (length >= capacity) length = capacity - 1;
+  memcpy(out, start, length); out[length] = 0; tagTrim(out);
+}
+
+
+inline void trackAlbumArtistFolder(const char *path, char *out, size_t capacity) {
+  if (!out || !capacity) return;
+  out[0]=0; if (!path) return;
+  const char *end=strrchr(path,'/'); if (!end || end==path) return;
+  while (end>path && end[-1]!='/') --end;
+  if (end<=path+1) return;
+  --end; const char *start=end;
+  while (start>path && start[-1]!='/') --start;
+  size_t length=(size_t)(end-start); if (length>=capacity) length=capacity-1;
+  memcpy(out,start,length); out[length]=0; tagTrim(out);
+}
+inline bool sameTrackAlbum(const char *a, const char *b) {
+  if (!a || !b) return false;
+  const char *ae=strrchr(a,'/'), *be=strrchr(b,'/');
+  size_t an=ae ? (size_t)(ae-a) : 0, bn=be ? (size_t)(be-b) : 0;
+  return an==bn && !memcmp(a,b,an);
 }

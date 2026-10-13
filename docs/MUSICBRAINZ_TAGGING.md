@@ -17,3 +17,5 @@ Primary documentation:
 - https://picard-docs.musicbrainz.org/en/latest/usage/retrieve_scan.html
 - https://picard-docs.musicbrainz.org/en/latest/tutorials/acoustid.html
 - https://xiph.org/flac/format.html
+
+R2 also reads ALBUM and shows it on the playing/library screens. Missing or uncached ALBUM falls back to the track parent folder, useful for album-organized cards. New tags are read when paused/stopped.

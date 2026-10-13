@@ -12,3 +12,9 @@ validation/metadata_checks_v6
 validation/serial_checks_v6
 validation/_host_checks_base.cpp
 *.bin
+
+validation/canvas_checks_v6
+
+validation/lyrics_browser_checks_v6
+validation/cover_checks_v6
+validation/tjpgd_check.o

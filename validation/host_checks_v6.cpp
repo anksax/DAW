@@ -19,8 +19,8 @@ using portMUX_TYPE=int;
 #define portEXIT_CRITICAL(x) ((void)(x))
 #define MALLOC_CAP_INTERNAL 1
 #define MALLOC_CAP_8BIT 2
-int allocations=0;
-void *heap_caps_malloc(size_t n,int){++allocations;return malloc(n);}
+int allocations=0;bool failAllAllocations=false;
+void *heap_caps_malloc(size_t n,int){++allocations;return failAllAllocations?nullptr:malloc(n);}
 struct AudioInfo {int sample_rate=0,channels=0,bits_per_sample=0;};
 class AudioStream {
 public:
@@ -61,12 +61,8 @@ public:
 };
 unsigned millis();
 uint32_t micros(){static uint32_t time=0;return time+=10;}
-#define TFT_BL 21
-int lastDuty=-1;
-struct OLED {void setContrast(uint8_t){}} oled;
 struct SerialStub {template<class... T>void printf(const char*,T...){}} Serial;
 #define DAW_LOG Serial
-bool ledcWrite(int pin,uint32_t duty){assert(pin==TFT_BL && duty<=255);lastDuty=duty;return true;}
 int source=0,decoder=0;
 // Master volume is applied AFTER nonlinear DSP, not before it.
 uint32_t playbackRateFor(uint32_t sourceRate);
@@ -179,6 +175,7 @@ enum FXMode {
   FX_FLANGER,
   FX_VOCODER,
   FX_RINGMOD,
+  FX_REVERB, // Append: preserve all previously stored IDs.
   FX_COUNT
 };
 
@@ -195,32 +192,21 @@ const char *fxNames[] = {
   "PHASER",
   "FLANGER",
   "VOCODER",
-  "RING MOD"
+  "RING MOD",
+  "REVERB"
 };
 static_assert(FX_COUNT <= 16, "FX mask storage is 16 bits");
 
-const uint8_t fxCharacterPreset[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12, 10};
-uint8_t storedParam[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12, 10};
-uint8_t storedMix[FX_COUNT] = {18, 18, 18, 18, 18, 18, 18, 18, 0, 18, 18, 25, 18};
+const uint8_t fxCharacterPreset[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12, 10, 14};
+uint8_t storedParam[FX_COUNT] = {12, 12, 16, 15, 12, 12, 12, 16, 25, 12, 18, 12, 10, 14};
+uint8_t storedMix[FX_COUNT] = {18, 18, 18, 18, 18, 18, 18, 18, 0, 18, 18, 25, 18, 12};
 uint16_t enabledFXMask = 0;
 int8_t eqDB[3] = {};
-int oledPage = 0; // FX or spectrum only
+int oledPage = 0; // FX, spectrum, lyrics
 bool mainSettingsOpen = false, mainFrameDirty = false, mainSettingsDirty = true;
 bool mainSettingsLayoutDirty = true;
-int selectedSetting = 0; // TFT brightness, bass, mid, treble
-uint8_t screenBrightness = 18;
-bool backlightReady = false;
-uint32_t brightnessDuty(uint8_t level) {
-  uint32_t value = (uint32_t)constrain((int)level, 1, 25);
-  return 4 + (value * value * 251 + 312) / 625;
-}
-void applyScreenBrightness() {
-  uint32_t duty = brightnessDuty(screenBrightness);
-  bool written = backlightReady && ledcWrite(TFT_BL, duty);
-  oled.setContrast((uint8_t)(16 + (constrain((int)screenBrightness, 1, 25) - 1) * 239 / 24));
-  DAW_LOG.printf("[BACKLIGHT] pin=%d level=%u duty=%u attached=%d write=%d\n",
-    TFT_BL, (unsigned)screenBrightness, (unsigned)duty, backlightReady, written);
-}
+static constexpr int MAIN_SETTING_COUNT = 4;
+int selectedSetting = 0; // bass, mid, treble, OLED view
 void toggleMainSettings() {
   mainSettingsOpen = !mainSettingsOpen;
   mainFrameDirty = true; mainSettingsDirty = true; mainSettingsLayoutDirty = true;
@@ -323,6 +309,12 @@ public:
         instance->eqLowAlpha = (int32_t)(32768.0f * (2 * PI * 200) / (sr + 2 * PI * 200));
         instance->eqHighAlpha = (int32_t)(32768.0f * (2 * PI * 4000) / (sr + 2 * PI * 4000));
         for (int i = 0; i < 3; ++i) instance->eqGain[i] = (int32_t)(32768.0f * powf(10.0f, gains[i] / 20.0f));
+        // Compensate positive EQ boosts with preamp attenuation instead of
+        // multiplying already full-scale PCM and hard-clipping the result.
+        int32_t peakGain = 32768;
+        for (int i = 0; i < 3; ++i) peakGain = max(peakGain, instance->eqGain[i]);
+        if (peakGain > 32768) for (int i = 0; i < 3; ++i)
+          instance->eqGain[i] = (int32_t)((int64_t)instance->eqGain[i] * 32768 / peakGain);
         instance->localRevision = revision;
         instance->refreshStageList();
       }
@@ -335,6 +327,7 @@ public:
   }
 
   ~DJFXEffect() {
+    if (reverbBuffer) free(reverbBuffer);
     if (flangerBuffer) free(flangerBuffer);
     if (chorusBuffer) free(chorusBuffer);
     for (auto &instance : instances) if (instance == this) instance = nullptr;
@@ -378,6 +371,7 @@ public:
         case FX_FLANGER: wet = processFlanger(value); break;
         case FX_VOCODER: wet = processVocoder(value); break;
         case FX_RINGMOD: wet = processRingMod(value); break;
+        case FX_REVERB: wet = processReverb(value); break;
       }
       wet = constrain(wet, (int32_t)-32768, (int32_t)32767);
       value = (value * (32768 - wetLevel) + wet * wetLevel) / 32768;
@@ -541,8 +535,48 @@ private:
     return constrain(output, (int32_t)-32768, (int32_t)32767);
   }
 
+  // Four damped parallel combs and two serial all-pass diffusers.
+  // Reserve fixed internal RAM before playback; never allocate per sample.
+  static constexpr int REVERB_SAMPLES = 8832;
+  int16_t *reverbBuffer = nullptr;
+  uint16_t reverbLength[6] = {1392,1776,1968,2064,240,96};
+  uint16_t reverbPosition[6] = {};
+  int32_t reverbDamped[4] = {}, reverbFeedback[4] = {};
+  int32_t reverbDamping = 12000;
+  int32_t processReverb(int32_t input) {
+    if (!reverbBuffer) return input; // Allocation failure preserves dry audio.
+    const int offsets[6] = {0,2112,4224,6336,8448,8704};
+    int32_t sum = 0;
+    for (int line = 0; line < 4; ++line) {
+      int index = offsets[line] + reverbPosition[line];
+      int32_t delayed = reverbBuffer[index];
+      int32_t step = (delayed - reverbDamped[line]) * reverbDamping;
+      reverbDamped[line] += step < 0 ? -((-step + 32767) / 32768) : (step + 32767) / 32768;
+      int32_t drive = (int32_t)((int64_t)input * (32768 - reverbFeedback[line]) / 32768);
+      int32_t feedback = (int32_t)((int64_t)reverbDamped[line] * reverbFeedback[line] / 32768);
+      reverbBuffer[index] = (int16_t)constrain(drive + feedback, (int32_t)-32768, (int32_t)32767);
+      sum += delayed;
+      if (++reverbPosition[line] >= reverbLength[line]) reverbPosition[line] = 0;
+    }
+    int32_t value = sum / 8; // Headroom before diffusion.
+    for (int line = 4; line < 6; ++line) {
+      int index = offsets[line] + reverbPosition[line];
+      int32_t delayed = reverbBuffer[index];
+      int32_t output = delayed - value / 2;
+      reverbBuffer[index] = (int16_t)constrain(value + output / 2, (int32_t)-32768, (int32_t)32767);
+      value = output;
+      if (++reverbPosition[line] >= reverbLength[line]) reverbPosition[line] = 0;
+    }
+    value *= 2;
+    if (value > 28000) value = 28000 + (value - 28000) / 4;
+    if (value < -28000) value = -28000 + (value + 28000) / 4;
+    return constrain(value, (int32_t)-32768, (int32_t)32767);
+  }
+
   void initState() {
     for (auto &instance : instances) if (!instance) { instance = this; break; }
+    reverbBuffer = (int16_t *)heap_caps_malloc(REVERB_SAMPLES * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (reverbBuffer) memset(reverbBuffer, 0, REVERB_SAMPLES * sizeof(int16_t));
     flangerBuffer = (int16_t *)heap_caps_malloc(FLANGER_CAPACITY * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (flangerBuffer) memset(flangerBuffer, 0, FLANGER_CAPACITY * sizeof(int16_t));
     chorusBuffer = (int16_t *)heap_caps_malloc(CHORUS_CAPACITY * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -787,6 +821,17 @@ private:
     flangerDepth = max(1, (int)((uint64_t)sr * (20 + p * 4) / 100000));
     flangerDepth = min(flangerDepth, (int)(FLANGER_CAPACITY - 4) / 2);
     flangerBase = flangerDepth + 2;
+    const int reverbMs[6] = {29,37,41,43,5,2};
+    const int reverbCaps[6] = {2112,2112,2112,2112,256,128};
+    float decaySeconds = 0.6f + parameters[FX_REVERB] * 0.02f;
+    for (int line = 0; line < 6; ++line) {
+      reverbLength[line] = (uint16_t)constrain((int)((uint64_t)sr * reverbMs[line] / 1000), 1, reverbCaps[line]);
+      if (reverbPosition[line] >= reverbLength[line]) reverbPosition[line] = 0;
+      if (line < 4) reverbFeedback[line] = (int32_t)(32768 * min(0.97f,
+        powf(0.001f, (float)reverbLength[line] / (sr * decaySeconds))));
+    }
+    float dampingOmega = 2 * PI * min(4500.0f, sr * 0.25f);
+    reverbDamping = (int32_t)(32768 * dampingOmega / (sr + dampingOmega));
     p = parameters[FX_RINGMOD];
     ringIncrement = (uint32_t)((uint64_t)(30 + p * 20) * 16777216 / sr);
     p = parameters[FX_VOCODER];
@@ -1421,6 +1466,10 @@ void processVisualizerFrame() {
 
 
 
+#include "../DJ_Audio_Console_V6/LibraryBrowser.h"
+LibraryBrowser libraryBrowser;
+const char *hostPaths[]={"/Artist/Album/00.flac","/Artist/Album/01.flac","/Artist/Album/02.flac","/Artist/Album/03.flac","/Artist/Album/04.flac"};
+void resetSongs(){libraryBrowser.build(hostPaths,5);libraryBrowser.enter();libraryBrowser.enter();}
 int encoderMux=0;volatile int encoder1Edges=0,encoder2Edges=0;
 unsigned fakeMillis=2000;unsigned millis(){return fakeMillis;}
 enum PlayState {STOPPED,PLAYING,PAUSED};PlayState sharedPlayState=STOPPED;
@@ -1438,6 +1487,22 @@ int analogRead(int pin){return pin==JOY_X ? rawX : rawY;}
 bool playerReady=true;
 bool joyLatched=false;int trackCount=5,selectedTrack=0,playingTrack=-1;
 int previousCalls=0,playCalls=0;void playTrack(int index){++previousCalls;selectedTrack=index;}void playSelected(){++playCalls;}
+void browseLibrary(int delta) {
+  libraryBrowser.move(delta);int track=libraryBrowser.selectedTrack();
+  if (track>=0) selectedTrack=track;
+  browserDirty=true;if (playingTrack<0)playerDirty=true;
+}
+void selectLibraryItem() {
+  int play=libraryBrowser.enter();int track=libraryBrowser.selectedTrack();
+  if (track>=0)selectedTrack=track;
+  browserDirty=true;if (playingTrack<0)playerDirty=true;
+  if (play>=0)playSelected();
+}
+void backLibrary() {
+  libraryBrowser.back();int track=libraryBrowser.selectedTrack();
+  if (track>=0)selectedTrack=track;
+  browserDirty=true;if (playingTrack<0)playerDirty=true;
+}
 void previousTrack() {
   if (!trackCount) return;
   int current = playingTrack >= 0 ? playingTrack : selectedTrack;
@@ -1453,9 +1518,12 @@ void changeFX(int delta) {
 }
 void handleEncoders() {
   portENTER_CRITICAL(&encoderMux);
-  int e1 = -(encoder1Edges / 4);
-  encoder1Edges %= 4; encoder2Edges %= 4; // E2 rotation has no assigned action.
+  int e1 = -(encoder1Edges / 4), e2 = encoder2Edges / 4;
+  encoder1Edges %= 4; encoder2Edges %= 4;
   portEXIT_CRITICAL(&encoderMux);
+  if (e2 && !mainSettingsOpen && trackCount) {
+    browseLibrary(e2);
+  }
   if (!e1 || mainSettingsOpen || oledPage != 0) return;
   portENTER_CRITICAL(&fxMux);
   fxMix = constrain((int)fxMix + e1, 0, 25);
@@ -1471,10 +1539,8 @@ void handleButtons() {
   if (!mainSettingsOpen && b1 == CLICK_EVENT) {
     changeFX(1); oledPage = 0; visualizerMode = false;
   }
-  if (!mainSettingsOpen && b2 == LONG_EVENT) {
-    oledPage = 1 - oledPage; visualizerMode = oledPage == 1;
-  }
-  if (b2 == CLICK_EVENT) { shuffleMode = !shuffleMode; playerDirty = true; }
+  if (b2 == LONG_EVENT) { shuffleMode = !shuffleMode; playerDirty = true; }
+  if (!mainSettingsOpen && b2 == CLICK_EVENT) selectLibraryItem();
   if (!mainSettingsOpen && b1 == LONG_EVENT) {
     portENTER_CRITICAL(&fxMux);
     uint16_t bit = 1U << fxMode;
@@ -1493,33 +1559,37 @@ void handleButtons() {
   }
 }
 void handleJoystick() {
+  static uint32_t repeatAt = 0;
+  static bool mustRecenter = false;
   static bool settingsLatched = false, wasInSettings = false;
+  static uint32_t settingsRepeatAt = 0;
   if (mainSettingsOpen) {
     wasInSettings = true;
     int dx = analogRead(JOY_X) - joyCenterX, dy = analogRead(JOY_Y) - joyCenterY;
     if (abs(dx) < JOY_DEADZONE && abs(dy) < JOY_DEADZONE) { settingsLatched = false; return; }
-    if (settingsLatched || max(abs(dx), abs(dy)) < JOY_TRIGGER) return;
+    if (max(abs(dx), abs(dy)) < JOY_TRIGGER) return;
+    if (settingsLatched && (int32_t)(millis() - settingsRepeatAt) < 0) return;
+    settingsRepeatAt = millis() + (settingsLatched ? 100 : 350);
     settingsLatched = true;
     if (abs(dy) > abs(dx)) {
-      selectedSetting = (selectedSetting + (dy > 0 ? 1 : 3)) % 4;
+      selectedSetting = (selectedSetting + (dy > 0 ? 1 : MAIN_SETTING_COUNT - 1)) % MAIN_SETTING_COUNT;
     } else {
       int delta = dx > 0 ? 1 : -1;
-      if (!selectedSetting) {
-        screenBrightness = (uint8_t)constrain((int)screenBrightness + delta, 1, 25);
-        applyScreenBrightness();
+      if (selectedSetting == 3) {
+        oledPage = (oledPage + delta + 3) % 3; visualizerMode = oledPage == 1;
       } else {
         portENTER_CRITICAL(&fxMux);
-        int band = selectedSetting - 1;
+        int band = selectedSetting;
         eqDB[band] = (int8_t)constrain((int)eqDB[band] + delta, -12, 12);
         ++fxRevision;
         portEXIT_CRITICAL(&fxMux);
       }
-      settingsPending = true; settingsChangedAt = millis();
+      if (selectedSetting < 3) { settingsPending = true; settingsChangedAt = millis(); }
     }
     mainSettingsDirty = true; return;
   }
   settingsLatched = false;
-  if (wasInSettings) { joyLatched = true; wasInSettings = false; }
+  if (wasInSettings) { joyLatched = true; mustRecenter = true; wasInSettings = false; }
 
   static uint32_t last = 0;
 
@@ -1567,18 +1637,15 @@ void handleJoystick() {
     JOY_DEADZONE
   ) {
 
-    joyLatched =
-      false;
+    joyLatched = false; mustRecenter = false; repeatAt = 0;
 
     return;
   }
 
-  if (
-    joyLatched
-  ) {
-
-    return;
-  }
+  bool vertical = abs(dy) > abs(dx) && abs(dy) >= JOY_TRIGGER;
+  if (mustRecenter) return;
+  if (joyLatched && (!vertical || (int32_t)(millis() - repeatAt) < 0)) return;
+  bool repeating = joyLatched;
 
   int largestAxis =
     abs(dx) >
@@ -1594,71 +1661,19 @@ void handleJoystick() {
     return;
   }
 
-  joyLatched =
-    true;
+  joyLatched = true;
+  repeatAt = millis() + (repeating ? 140 : 450);
 
-  // UP / DOWN
-
-  if (
-    abs(dy) >
-    abs(dx)
-  ) {
-
-    if (
-      dy > 0
-    ) {
-
-      selectedTrack++;
-
-    } else {
-
-      selectedTrack--;
-    }
-
-    if (
-      selectedTrack >=
-      trackCount
-    ) {
-
-      selectedTrack = 0;
-    }
-
-    if (
-      selectedTrack < 0
-    ) {
-
-      selectedTrack =
-        trackCount - 1;
-    }
-
-    DAW_LOG.printf("[JOY] browse raw=%d,%d selected=%d\n", x, y, selectedTrack);
-    browserDirty =
-      true;
-
-    if (playingTrack < 0) playerDirty = true;
-
-    return;
-  }
-
-  // LEFT / RIGHT
-
-  if (
-    dx < 0
-  ) {
-
-    previousTrack();
-
-  } else {
-
-    playSelected();
-  }
+  if (vertical) browseLibrary(dy>0 ? 1 : -1);
+  else if (dx<0) backLibrary();
+  else selectLibraryItem();
 }
 void loadFXSettings() {
   preferencesReady = fxPreferences.begin("daw-fx-v2", false);
   if (!preferencesReady) return;
   size_t length = fxPreferences.getBytesLength("values");
   uint8_t values[FX_COUNT * 2];
-  if ((length == 16 || length == 18 || length == sizeof(values)) && fxPreferences.getBytes("values", values, length) == length) {
+  if ((length == 16 || length == 18 || length == 26 || length == sizeof(values)) && fxPreferences.getBytes("values", values, length) == length) {
     int slots = length / 2;
     for (int i = 0; i < slots; ++i) {
       storedParam[i] = min(values[i], (uint8_t)25);
@@ -1680,8 +1695,6 @@ void loadFXSettings() {
     settingsPending = true; settingsChangedAt = millis();
   }
   memcpy(storedParam, fxCharacterPreset, sizeof(storedParam));
-  if (fxPreferences.getBytesLength("bright") == sizeof(screenBrightness)) fxPreferences.getBytes("bright", &screenBrightness, sizeof(screenBrightness));
-  screenBrightness = (uint8_t)constrain((int)screenBrightness, 1, 25);
   fxParam = storedParam[fxMode]; fxMix = storedMix[fxMode];
 }
 void saveFXSettingsWhenIdle() {
@@ -1695,7 +1708,6 @@ void saveFXSettingsWhenIdle() {
   bool saved = fxPreferences.putBytes("values", values, sizeof(values)) == sizeof(values);
   if (saved) saved = fxPreferences.putBytes("eq", eqDB, sizeof(eqDB)) == sizeof(eqDB);
   if (saved) saved = fxPreferences.putBytes("mask", &enabledFXMask, sizeof(enabledFXMask)) == sizeof(enabledFXMask);
-  if (saved) saved = fxPreferences.putBytes("bright", &screenBrightness, sizeof(screenBrightness)) == sizeof(screenBrightness);
   uint8_t simpleVersion = 1;
   if (saved) saved = fxPreferences.putBytes("simple", &simpleVersion, sizeof(simpleVersion)) == sizeof(simpleVersion);
   if (audioMutex) xSemaphoreGive(audioMutex);
@@ -1715,15 +1727,28 @@ void servicePlaybackRate() {
   xSemaphoreGive(audioMutex);
   playerDirty = true;
 }
-int draws=0;const int C_BG=0;struct TFT {void fillScreen(int){assert(mutexHeld);}} tft;
-void drawHeader(){assert(mutexHeld);}void drawStaticCards(){assert(mutexHeld);}void drawPlayer(){assert(mutexHeld);++draws;}
-void drawBrowser(){assert(mutexHeld);}void drawVolume(){assert(mutexHeld);}void drawTimeline(){assert(mutexHeld);}void drawMainSettings(){assert(mutexHeld);}
+int draws=0;const int C_BG=0;
+int pdMS_TO_TICKS(int ms){return ms;}
+struct TFT {
+ static constexpr int WIDTH_PX=240,STRIPE_ROWS=8;
+ uint16_t pixels[240*320]={};bool ready=true;int dirty=-1,sentCount=0;
+ uint16_t *getBuffer(){return ready?pixels:nullptr;}
+ void fillScreen(int){assert(!mutexHeld);dirty=0;}
+ void markAll(){dirty=0;}
+ int nextDirty(){return dirty;}
+ void sent(int stripe){assert(!mutexHeld && stripe==dirty);dirty=-1;++sentCount;}
+} tft;
+using TFTCanvas=TFT;
+int transfers=0;
+struct Panel {void drawRGBBitmap(int,int,uint16_t*,int width,int rows){assert(!mutexHeld && width==240 && rows==8);++transfers;}} panel;
+void drawHeader(){assert(!mutexHeld);}void drawStaticCards(){assert(!mutexHeld);}void drawPlayer(){assert(!mutexHeld);++draws;}
+void drawBrowser(){assert(!mutexHeld);}void drawVolume(){assert(!mutexHeld);}void drawTimeline(){assert(!mutexHeld);}void drawAlbumName(){assert(!mutexHeld);}void drawMainSettings(){assert(!mutexHeld);}
+
 void renderTFT() {
   static uint32_t last = 0;
-  if (millis() - last < 80) return;
+  if (!tft.getBuffer() || millis() - last < 20) return;
   last = millis();
-  if (audioMutex && xSemaphoreTake(audioMutex, 0) != pdTRUE) return;
-  uint32_t displayStarted = micros();
+  // RAM drawing never owns the audio/SD lock and cannot blank the physical TFT.
   if (mainFrameDirty) {
     tft.fillScreen(C_BG); drawHeader();
     if (!mainSettingsOpen) {
@@ -1733,24 +1758,40 @@ void renderTFT() {
   }
   if (mainSettingsOpen) {
     if (mainSettingsDirty) { drawMainSettings(); mainSettingsDirty = false; }
-    uint32_t held = micros() - displayStarted;
-    if (held > maxDisplayHoldUs) maxDisplayHoldUs = held;
-    if (audioMutex) xSemaphoreGive(audioMutex);
     return;
   }
-  static uint32_t lastTimeline = 0;
+  static uint32_t lastTimeline = 0, lastAlbumScroll = 0;
   if (playerDirty) { drawPlayer(); drawTimeline(); playerDirty = false; lastTimeline = millis(); }
   else if (millis() - lastTimeline >= 250) { drawTimeline(); lastTimeline = millis(); }
+  if (millis()-lastAlbumScroll>=450) {drawAlbumName();lastAlbumScroll=millis();}
   if (browserDirty) { drawBrowser(); browserDirty = false; }
   if (volumeDirty) { drawVolume(); volumeDirty = false; }
-  fxDirty = false; // OLED renders FX independently
+  fxDirty = false;
+}
+void serviceTFT() {
+  static uint32_t lastRepaint = 0;
+  if (!tft.getBuffer()) return;
+  // Refresh retained content without clearing the panel or resetting playback.
+  if (millis() - lastRepaint >= 5000) { tft.markAll(); lastRepaint = millis(); }
+  int stripe = tft.nextDirty();
+  if (stripe < 0) return;
+  uint32_t displayStarted = micros();
+  int row = stripe * TFTCanvas::STRIPE_ROWS;
+  // Both Arduino SD and Adafruit hardware SPI use this same SPIClass transaction
+  // mutex. Do not wait for the whole decoder/I2S copy via audioMutex here.
+  panel.drawRGBBitmap(0, row, tft.getBuffer() + row * TFTCanvas::WIDTH_PX,
+    TFTCanvas::WIDTH_PX, TFTCanvas::STRIPE_ROWS);
+  tft.sent(stripe);
   uint32_t held = micros() - displayStarted;
   if (held > maxDisplayHoldUs) maxDisplayHoldUs = held;
-  if (audioMutex) xSemaphoreGive(audioMutex);
 }
 int main(){
- initTremoloLUT();initFFT();
- fakeMillis+=100;playerDirty=true;audioBusy=true;renderTFT();assert(draws==0 && playerDirty);
+ initTremoloLUT();initFFT();resetSongs();
+ fakeMillis+=100;playerDirty=true;audioBusy=true;renderTFT();assert(draws==1 && !playerDirty);
+ tft.dirty=0;serviceTFT();assert(transfers==1 && tft.dirty==-1 && !mutexHeld);
+ audioBusy=false;tft.dirty=1;serviceTFT();assert(transfers==2 && !mutexHeld);
+ tft.ready=false;serviceTFT();assert(transfers==2);tft.ready=true;
+ fakeMillis+=5000;serviceTFT();assert(transfers==3 && !mutexHeld);
  fakeMillis+=100;audioBusy=false;renderTFT();assert(draws==1 && !mutexHeld);
  mainSettingsOpen=true;mainSettingsDirty=true;fakeMillis+=100;renderTFT();assert(!mutexHeld);mainSettingsOpen=false;
  {
@@ -1776,15 +1817,16 @@ int main(){
   assert(allocations==before);
  }
  enabledFXMask=0;++fxRevision;DJFXEffect::prepareAll();masterVolumePercent=12;
- std::cout<<"PASS: TFT mutex defer/release, partial-output retry without PCM loss, five-ms stage fades, high-rate chorus stress\n";
+ std::cout<<"PASS: TFT RAM redraw while audio busy, short stripe transfers independent of decoder/I2S lock, periodic repaint, partial-output retry without PCM loss, five-ms stage fades, high-rate chorus stress\n";
 
  fxMode=FX_FILTER;fxMix=storedMix[fxMode];
  enc1Button.event=CLICK_EVENT;handleButtons();assert(fxMode==FX_ECHO && !visualizerMode);
- enc2Button.event=LONG_EVENT;handleButtons();assert(visualizerMode && oledPage==1 && fxMode==FX_ECHO);
- enc2Button.event=LONG_EVENT;handleButtons();assert(!visualizerMode && oledPage==0);
+ enc2Button.event=LONG_EVENT;handleButtons();assert(shuffleMode && !visualizerMode && fxMode==FX_ECHO);
+ enc2Button.event=LONG_EVENT;handleButtons();assert(!shuffleMode && !visualizerMode && oledPage==0);
  encoder1Edges=-400;handleEncoders();assert(fxMix==25);
  encoder1Edges=400;handleEncoders();assert(fxMix==0);
- encoder2Edges=400;handleEncoders();assert(fxMix==0);
+ int beforeBrowse=selectedTrack;encoder2Edges=8;handleEncoders();assert(fxMix==0 && selectedTrack==(beforeBrowse+2)%trackCount);
+ encoder2Edges=-12;handleEncoders();assert(selectedTrack==(beforeBrowse+trackCount-1)%trackCount);
  for(int mode:{FX_PHASER,FX_FLANGER,FX_RINGMOD}){fxMode=mode;enc1Button.event=LONG_EVENT;handleButtons();}
  assert(activeAudioEffects(enabledFXMask)==3);
  fxMode=FX_VOCODER;enc1Button.event=LONG_EVENT;handleButtons();assert(!(enabledFXMask&(1<<FX_VOCODER)) && activeAudioEffects(enabledFXMask)==3);
@@ -1793,46 +1835,61 @@ int main(){
  enc1Button.event=LONG_EVENT;handleButtons();assert(playbackRateFor(48000)==48000);
  fxMode=FX_PHASER;enc1Button.event=LONG_EVENT;handleButtons();assert(activeAudioEffects(enabledFXMask)==2);
  joyButton.event=LONG_EVENT;handleButtons();assert(mainSettingsOpen && !pauseCalls);
- selectedSetting=0;screenBrightness=18;backlightReady=true;
+ selectedSetting=0;eqDB[0]=0;
  auto joy=[&](int dx,int dy){rawX=joyCenterX;rawY=joyCenterY;handleJoystick();rawX+=dx;rawY+=dy;handleJoystick();};
- joy(1600,0);assert(screenBrightness==19 && lastDuty==(int)brightnessDuty(19));
- handleJoystick();assert(screenBrightness==19); // held deflection does not repeat.
+ joy(1600,0);assert(eqDB[0]==1);
+ handleJoystick();assert(eqDB[0]==1);
+ fakeMillis+=350;handleJoystick();assert(eqDB[0]==2);
+ fakeMillis+=100;handleJoystick();assert(eqDB[0]==3);
  joy(0,1600);assert(selectedSetting==1);
- joy(1600,0);assert(eqDB[0]==1 && !playCalls);
- joy(-1600,0);assert(eqDB[0]==0 && !previousCalls);
+ joy(1600,0);assert(eqDB[1]==1 && !playCalls);
+ joy(-1600,0);assert(eqDB[1]==0 && !previousCalls);
+ selectedSetting=0;
  for(int i=0;i<30;++i){joy(1600,0);}assert(eqDB[0]==12);
  for(int i=0;i<30;++i){joy(-1600,0);}assert(eqDB[0]==-12);
  int selection=selectedSetting;encoder1Edges=40;encoder2Edges=40;handleEncoders();assert(selectedSetting==selection && eqDB[0]==-12);
  enc1Button.event=CLICK_EVENT;handleButtons();assert(fxMode==FX_PHASER);
- enc2Button.event=CLICK_EVENT;handleButtons();assert(shuffleMode && !pauseCalls);
+ int settingsPlayCalls=playCalls;enc2Button.event=CLICK_EVENT;handleButtons();assert(playCalls==settingsPlayCalls && !pauseCalls);
+ selectedSetting=3;joy(1600,0);assert(oledPage==1 && visualizerMode);
+ joy(1600,0);assert(oledPage==2 && !visualizerMode);
+ joy(1600,0);assert(oledPage==0 && !visualizerMode);
+ joy(-1600,0);assert(oledPage==2 && !visualizerMode);
+ joy(1600,0);assert(oledPage==0);selectedSetting=selection;
  joyButton.event=CLICK_EVENT;handleButtons();assert(!mainSettingsOpen && !pauseCalls);
  fakeMillis+=100;handleJoystick();assert(!previousCalls); // exit whilst deflected must not skip a song.
  rawX=joyCenterX;rawY=joyCenterY;fakeMillis+=100;handleJoystick();assert(!joyLatched);
  joyButton.event=CLICK_EVENT;handleButtons();assert(pauseCalls==1);
- playingTrack=-1;
+ int beforeSelection=playCalls;enc2Button.event=CLICK_EVENT;handleButtons();assert(playCalls==beforeSelection+1 && !shuffleMode);
+ playingTrack=-1;resetSongs();
  auto move=[&](int dx,int dy){rawX=2048;rawY=2048;fakeMillis+=30;handleJoystick();rawX+=dx;rawY+=dy;fakeMillis+=30;handleJoystick();};
  selectedTrack=0;move(0,1000);assert(selectedTrack==1);move(0,-1000);assert(selectedTrack==0);move(0,-1000);assert(selectedTrack==4);
- int beforePrevious=previousCalls;move(-1000,0);assert(previousCalls==beforePrevious+1 && selectedTrack==3);
- int beforePlay=playCalls;move(1000,0);assert(playCalls==beforePlay+1);
+ int beforePrevious=previousCalls;move(-1000,0);assert(previousCalls==beforePrevious && libraryBrowser.view()==LibraryBrowser::ALBUMS);
+ fakeMillis+=1000;handleJoystick();assert(libraryBrowser.view()==LibraryBrowser::ALBUMS);
+ int beforePlay=playCalls;move(1000,0);assert(playCalls==beforePlay && libraryBrowser.view()==LibraryBrowser::SONGS);
+ move(1000,0);assert(playCalls==beforePlay+1);
+ resetSongs();selectedTrack=0;move(0,1000);assert(selectedTrack==1);
+ fakeMillis+=425;handleJoystick();assert(selectedTrack==1);
+ fakeMillis+=25;handleJoystick();assert(selectedTrack==2);
+ fakeMillis+=150;handleJoystick();assert(selectedTrack==3);
+ rawX=rawY=2048;fakeMillis+=30;handleJoystick();
  enabledFXMask=1<<FX_SLOW;storedMix[FX_SLOW]=25;masterOutput.setAudioInfo({48000,2,16});assert(outputSampleRate==24000);
  storedMix[FX_SLOW]=10;rateChangePending=true;rateChangedAt=fakeMillis;servicePlaybackRate();assert(rateChangePending && outputSampleRate==24000);
  fakeMillis+=200;servicePlaybackRate();assert(outputSampleRate==24000);
  storedMix[FX_SLOW]=5;rateChangedAt=fakeMillis;fakeMillis+=249;servicePlaybackRate();assert(outputSampleRate==24000);
  fakeMillis+=1;servicePlaybackRate();assert(!rateChangePending && outputSampleRate==43200);
- assert(brightnessDuty(1)==4 && brightnessDuty(25)==255);
  enabledFXMask=0;
 
- for(int slots:{8,9,13}) {
+ for(int slots:{8,9,13,14}) {
   fxPreferences.data.clear();std::vector<uint8_t> old(slots*2);
   for(int i=0;i<slots;++i){old[i]=(i+3)%26;old[i+slots]=(i+14)%26;}
   fxPreferences.data["values"]=old;loadFXSettings();
   for(int i=0;i<slots;++i){assert(storedParam[i]==fxCharacterPreset[i]);if(i!=FX_SLOW)assert(storedMix[i]==old[i+slots]);}
   if(slots>=9)assert(storedMix[FX_SLOW]==25-old[FX_SLOW]);
  }
- preferencesReady=true;screenBrightness=9;storedMix[FX_RINGMOD]=7;eqDB[2]=5;settingsPending=true;settingsChangedAt=0;
+ preferencesReady=true;storedMix[FX_RINGMOD]=7;storedMix[FX_REVERB]=9;enabledFXMask=1<<FX_REVERB;eqDB[2]=5;settingsPending=true;settingsChangedAt=0;
  sharedPlayState=PLAYING;saveFXSettingsWhenIdle();assert(settingsPending);
- sharedPlayState=PAUSED;saveFXSettingsWhenIdle();assert(!settingsPending);
- screenBrightness=25;storedMix[FX_RINGMOD]=25;eqDB[2]=0;loadFXSettings();assert(screenBrightness==9 && storedMix[FX_RINGMOD]==7 && eqDB[2]==5);
+ sharedPlayState=PAUSED;saveFXSettingsWhenIdle();assert(!settingsPending && !fxPreferences.data.count("bright"));
+ storedMix[FX_RINGMOD]=25;eqDB[2]=0;fxPreferences.data["bright"]={1};loadFXSettings();assert(storedMix[FX_RINGMOD]==7 && storedMix[FX_REVERB]==9 && (enabledFXMask&(1<<FX_REVERB)) && eqDB[2]==5);
  eqDB[0]=eqDB[1]=eqDB[2]=0;enabledFXMask=0;++fxRevision;DJFXEffect::prepareAll();
  trackPCMBytes=0;trackTotalFrames=48000*10;trackSourceRate=48000;trackChannels=2;timelineCounting=true;
  int16_t timelineData[9600]={};masterOutput.write((uint8_t*)timelineData,sizeof(timelineData));
@@ -1844,6 +1901,23 @@ int main(){
  std::cout<<"PASS: click/hold FX selection, single stage on/off layer, three-stage cap, joystick settings/re-arm/isolation, strength bounds, migration/persistence, PCM timeline/counting/clamp\n";
 
  initTremoloLUT();initFFT();
+ {DJFXEffect tone;enabledFXMask=0;eqDB[0]=eqDB[1]=eqDB[2]=12;++fxRevision;DJFXEffect::prepareAll();
+  for(int i=0;i<1000;++i)assert(tone.process(20000)==20000);
+  eqDB[0]=eqDB[1]=eqDB[2]=0;}
+ std::cout<<"PASS: positive EQ boost compensation preserves clean full-scale gain when bands are equally boosted\n";
+
+ for(int rate:{8000,44100,48000,192000}) {
+  DJFXEffect room;room.prepare(rate,FX_REVERB,56,100,true,800+rate);
+  for(int i=0;i<rate/20;++i)room.process(0);
+  room.process(28000);int tail=0;int allocationsBefore=allocations;
+  for(int i=0;i<rate;++i)if(room.process(0)!=0)++tail;
+  assert(tail>20);assert(allocations==allocationsBefore);
+  for(int i=0;i<rate*6;++i)room.process(0);
+  assert(abs((int)room.process(0))<3);
+ }
+ failAllAllocations=true;{DJFXEffect room;room.prepare(48000,FX_REVERB,56,100,true,444);assert(room.process(1234)==1234);}failAllAllocations=false;
+ std::cout<<"PASS: reverb impulse tail/decay, 8/44.1/48/192 kHz bounds, allocation-failure dry fallback, no per-sample allocations\n";
+
  for(int rate:{8000,24000,48000,192000}) {
   DJFXEffect voice;outputSampleRate=rate;enabledFXMask=1<<FX_VOCODER;
   for(int block=0;block<100;++block){
@@ -1875,7 +1949,7 @@ int main(){
   for(int p=0;p<=100;p+=10){effect.prepare(192000,mode,p,100,true,++rev);effect.process(-32768);}
   assert(allocations==before);
  }
- std::cout<<"PASS: bypass and zero mix are bit-exact; all twelve DSP effects alter PCM; no allocations in processing or parameter updates\n";
+ std::cout<<"PASS: bypass and zero mix are bit-exact; all thirteen PCM effects alter PCM; no allocations in processing or parameter updates\n";
  masterVolumePercent=12;
  int16_t loud[600];std::fill(std::begin(loud),std::end(loud),20000);
  assert(masterOutput.write((uint8_t*)loud,sizeof(loud))==sizeof(loud));
