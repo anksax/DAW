@@ -9,6 +9,7 @@ A standalone FLAC player and DJ-style audio console for the **ESP32-S3 N16R8**, 
 **Active development:** USB/Serial Monitor disconnection still causes distorted output on the user's hardware. Disabling diagnostic writes has not resolved the reported behavior. Do not treat V6 as a stable audio release.
 
 ## Quick start
+
 1. Install Arduino-ESP32 **3.3.12**, AudioTools, codec-libfoxenflac, Adafruit GFX, Adafruit ST7735 and ST7789 Library, and U8g2.
 2. Open **[DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino](DJ_Audio_Console_V6/DJ_Audio_Console_V6.ino)**. Keep **all files** in that sketch folder together, including lyric/browser/cover headers and the bundled JPEG C decoder. The root V4 sketch is retained as a legacy reference.
 3. Use ESP32S3 Dev Module, 16 MB flash, OPI PSRAM and the settings in [Board setup](docs/BOARD_SETUP.md). Wiring is in [Hardware](docs/HARDWARE.md).
