@@ -10,8 +10,8 @@ Run `bash validation/run_checks.sh`. Python extracts the current DSP/control cod
 |---|---|
 | Boot/library | Empty SD, single track, nested files, malformed/unsupported FLAC |
 | Formats | 44.1/48 kHz, mono/stereo, 16/24-bit source, track rate changes |
-| Transport | Pause/resume position, EOF next, shuffle no immediate repeat, previous |
-| Controls | Click versus hold, clockwise E1 behavior, joystick neutral/re-arm, settings exit |
+| Transport | Current-song pause/resume, EOF next, shuffle no immediate repeat |
+| Controls | E2 single/double/hold separation, E1 direction, nested back navigation, Settings edit/exit isolation |
 | Persistence | Change strengths/mask/EQ, pause, wait two seconds, power cycle |
 | Audio | Every effect individually, maximum stack, rapid SLOW/vocoder edits, silence and clipping |
 | UI | OLED FX/spectrum, TFT title/artist/timeline, fixed backlight GPIO 21, missing tags |
@@ -22,11 +22,15 @@ For diagnostic captures enable `DAW_SERIAL_DIAGNOSTICS=1` in `SerialDiagnostics.
 
 USB-disconnect distortion remains open. Serial diagnostics being off has not resolved the user's report. Priorities are reproducing it with standalone power, verifying boot versus stall, measuring display/decode latency and reducing timing pressure before adding features.
 
-Future work includes seeking, queue/folder navigation, recording, MIDI, pitch-preserving time stretching and two-decoder mixing. None is implemented by V6.
+Future work includes seeking, playback queues, recording, MIDI, pitch-preserving time stretching and two-decoder mixing. Folder navigation is already implemented. None is implemented by V6.
 
 
-The 13 October revision uses a PSRAM TFT canvas and one 8-row SPI stripe per loop. Test that controls/browser update while playing, vertical joystick holds repeat, horizontal holds do not repeatedly restart tracks, canvas failure leaves audio/OLED diagnostic usable, and full screen changes never clear physical pixels before redraw. Measure [PERF] displayHoldMaxUs rather than assuming a hard timing limit from stripe size. Check continuous audio at 44.1/48/192 kHz with the maximum FX stack and visualizer; the actual scheduler/I2S behavior is not simulated by host tests. Uncached artist reads intentionally wait until pause/stop. Check random blank-panel recovery from five-second retained-content repainting; a reset/sleep/power fault may require separate hardware work.
+## Current encoder-only revision
 
-R2 acceptance also covers saved reverb tails/strength, E2 click song selection/hold shuffle, ALBUM versus folder fallback, positive EQ boost headroom and removed brightness preferences.
+The owner-supplied `DAW_Encoder2(2).ino` is integrated under the existing V6 sketch name. Settings shows **V6 R4 20261019 LOG:OFF/ON**. E2 double-click returns one folder level and hold opens Settings. Test single-click deferral, bounce, click versus double-click/hold, current-song pause/resume and Settings row/edit isolation.
 
-R3 tests add hierarchy enter/back/wrap/empty state, current-level joystick/E2 selection, source-time LRC lookup/paging/bounds/fuzzing, artist-folder fallback and actual bundled JPEG decoding/FLAC picture bounds. Validate song changes, pause/resume/SLOW lyric timing, no LRC, no art, alternate artist/album folders and artwork transition delay on hardware.
+Native checks extract the actual button state machine separately from event-driven handler tests. They cover debounce, double-click timing, hold/re-arm, delayed second click, Settings wrapping/edit bounds and retained audio/metadata/lyrics/JPEG behavior. Host models do not measure FreeRTOS scheduling or physical switch behavior.
+
+TFT drawing remains in a PSRAM canvas with short SPI stripes independent of the decoder/I2S mutex. Test controls while audio plays, canvas failure, maximum FX stack, sample-rate changes, delayed metadata, repaint and USB-disconnect behavior on the board. Test source-time lyrics during pause/SLOW, missing art/LRC and album-transition delays.
+
+FX strengths/enables and EQ persist only after an idle save. Shuffle, OLED page, volume and selection remain session-only. Onboard SD wiring still requires exact-board verification. Historical joystick controls in the changelog are superseded by the README.

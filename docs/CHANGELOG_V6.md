@@ -1,5 +1,19 @@
 # V6 changes from the repository's V4 baseline
 
+## R4 — encoder-only prototype (19 October 2026)
+
+This section supersedes historical control mappings below.
+
+- Integrate the owner's latest `DAW_Encoder2(2).ino` into the existing V6 folder. Add the visible **V6 R4 20261019 LOG:OFF/ON** identifier.
+- Remove joystick pins, calibration, reads and button handling; GPIOs 1/2/18 are no longer used for those inputs.
+- E2 rotates to browse, clicks to enter/play (current song pauses/resumes), double-clicks to return one folder level and holds to open/close Settings.
+- Settings has bass/mid/treble, OLED VIEW and PLAY ORDER. Rotate to select a row, click to edit, rotate to adjust, then click to finish. Double-click leaves editing or closes Settings when not editing.
+- Keep E1 FX strength/select/toggle and fader volume. Retain reverb, three PCM stages plus SLOW, EQ headroom, album hierarchy/art, lyrics, timeline and buffered TFT updates.
+- Correct hardware documentation to CJM1334, the ESP onboard SD reader and unused TFT SD slot. SD GPIOs remain a firmware assumption pending exact-board verification.
+- Update actual-source gesture/Settings checks. CI compiles the same V6 entry point.
+- Preserve NVS behavior: FX strengths/enables and EQ save while paused/stopped; shuffle/OLED page/volume/selection remain session-only. USB-disconnect distortion and physical display/audio acceptance remain open.
+
+
 ## Playback and DSP
 
 - Explicit PCM16 decoder/DSP/output routing for 16/24-bit FLAC sources; preserve decoded native rates and configure the physical clock separately for SLOW.

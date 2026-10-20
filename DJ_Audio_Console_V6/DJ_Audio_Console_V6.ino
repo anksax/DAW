@@ -12,20 +12,15 @@
   ENC1 click  : next effect
   ENC1 long   : selected effect ON/OFF
   ENC2 rotate : browse current library level
-  ENC2 click  : enter folder / play selected song
-  ENC2 long   : shuffle / sequential
-  JOY up/down : select track
-  JOY right   : enter folder / play song
-  JOY left    : back to album / artist view
-  JOY press   : play / pause (starts selected track when stopped)
-  JOY hold    : EQ / OLED settings; joystick axes select/adjust
+  ENC2 click  : enter folder / play song; current song pauses/resumes
+  ENC2 double : back one library level
+  ENC2 hold   : open / close settings
+  SETTINGS    : ENC2 rotate selects; click toggles editing; rotate adjusts
+  SETTINGS    : double-click ends editing or closes settings
+  SHUFFLE     : select PLAY ORDER in settings, click, rotate
   FADER       : master volume
 
   Supported files in this build: FLAC
-
-  Joystick button wiring:
-  SW  -> GPIO 18
-  GND -> GND
 
   FLAC:
   24-bit source FLAC is accepted.
@@ -95,10 +90,6 @@ BestEffortSerialLog debugSerial(Serial, serialLogReady);
 #define ENC2_DT     40
 #define ENC2_SW     47
 
-#define JOY_X       1
-#define JOY_Y       2
-#define JOY_SW      18
-
 #define FADER_PIN   7
 
 #define MAX_TRACKS 512
@@ -111,8 +102,7 @@ BestEffortSerialLog debugSerial(Serial, serialLogReady);
 #define BUTTON_DEBOUNCE_MS 30
 #define LONG_PRESS_MS 650
 
-#define JOY_DEADZONE 500
-#define JOY_TRIGGER 900
+#define DOUBLE_CLICK_MS 300
 
 #define FADER_MIN 80
 #define FADER_MAX 4010
@@ -424,10 +414,12 @@ int8_t eqDB[3] = {};
 int oledPage = 0; // FX, spectrum, lyrics
 bool mainSettingsOpen = false, mainFrameDirty = false, mainSettingsDirty = true;
 bool mainSettingsLayoutDirty = true;
-static constexpr int MAIN_SETTING_COUNT = 4;
-int selectedSetting = 0; // bass, mid, treble, OLED view
+static constexpr int MAIN_SETTING_COUNT = 5;
+int selectedSetting = 0; // bass, mid, treble, OLED view, play order
+bool settingEditing = false;
 void toggleMainSettings() {
   mainSettingsOpen = !mainSettingsOpen;
+  settingEditing = false;
   mainFrameDirty = true; mainSettingsDirty = true; mainSettingsLayoutDirty = true;
 }
 uint32_t stackLimitUntil = 0;
@@ -2031,124 +2023,65 @@ void audioTask(void *param) {
 enum ButtonEvent {
   NO_EVENT,
   CLICK_EVENT,
-  LONG_EVENT
+  LONG_EVENT,
+  DOUBLE_CLICK_EVENT
 };
 
 struct Button {
-
   uint8_t pin;
-
-  bool stable = HIGH;
-  bool rawLast = HIGH;
-
-  bool longSent = false;
-
-  uint32_t changedAt = 0;
-  uint32_t pressedAt = 0;
+  bool detectDouble = false;
+  bool stable = HIGH, rawLast = HIGH;
+  bool longSent = false, clickPending = false, secondPress = false;
+  uint32_t changedAt = 0, pressedAt = 0, releasedAt = 0;
 
   void begin() {
-
-    pinMode(
-      pin,
-      INPUT_PULLUP
-    );
-
-    stable =
-      rawLast =
-      digitalRead(pin);
-
-    changedAt =
-      millis();
+    pinMode(pin, INPUT_PULLUP);
+    stable = rawLast = digitalRead(pin);
+    changedAt = millis();
+    longSent = clickPending = secondPress = false;
   }
 
-  ButtonEvent update(
-    uint32_t now
-  ) {
-
-    bool raw =
-      digitalRead(pin);
-
-    if (
-      raw !=
-      rawLast
-    ) {
-
-      rawLast =
-        raw;
-
-      changedAt =
-        now;
-    }
-
-    if (
-      now -
-      changedAt <
-      BUTTON_DEBOUNCE_MS
-    ) {
-
-      return NO_EVENT;
-    }
-
-    if (
-      raw !=
-      stable
-    ) {
-
-      stable =
-        raw;
-
-      if (
-        stable ==
-        LOW
-      ) {
-
-        pressedAt =
-          now;
-
-        longSent =
-          false;
-
-      } else {
-
-        if (
-          !longSent
-        ) {
-
+  ButtonEvent update(uint32_t now) {
+    bool raw = digitalRead(pin);
+    if (raw != rawLast) { rawLast = raw; changedAt = now; }
+    if (now - changedAt < BUTTON_DEBOUNCE_MS) return NO_EVENT;
+    if (raw != stable) {
+      stable = raw;
+      if (stable == LOW) {
+        pressedAt = now;
+        longSent = false;
+        secondPress = detectDouble && clickPending && now - releasedAt <= DOUBLE_CLICK_MS;
+        // A late second press must not swallow the preceding single click.
+        if (detectDouble && clickPending && !secondPress) {
+          clickPending = false;
           return CLICK_EVENT;
         }
+      } else if (!longSent) {
+        if (!detectDouble) return CLICK_EVENT;
+        if (secondPress) {
+          clickPending = secondPress = false;
+          return DOUBLE_CLICK_EVENT;
+        }
+        clickPending = true;
+        releasedAt = now;
       }
     }
-
-    if (
-      stable ==
-      LOW &&
-      !longSent &&
-      now -
-      pressedAt >=
-      LONG_PRESS_MS
-    ) {
-
-      longSent =
-        true;
-
+    if (stable == LOW && !longSent && now - pressedAt >= LONG_PRESS_MS) {
+      longSent = true;
+      clickPending = secondPress = false;
       return LONG_EVENT;
     }
-
+    // Wait for the double-click window before invoking the single action.
+    if (detectDouble && clickPending && stable == HIGH && now - releasedAt >= DOUBLE_CLICK_MS) {
+      clickPending = false;
+      return CLICK_EVENT;
+    }
     return NO_EVENT;
   }
 };
 
-Button enc1Button{
-  ENC1_SW
-};
-
-Button enc2Button{
-  ENC2_SW
-};
-
-Button joyButton{
-  JOY_SW
-};
+Button enc1Button{ENC1_SW};
+Button enc2Button{ENC2_SW, true};
 
 // ================================================================
 // ENCODERS
@@ -2311,52 +2244,7 @@ int readEncoder(
 }
 
 // ================================================================
-// JOYSTICK
-// ================================================================
-
-int joyCenterX = 2048;
-int joyCenterY = 2048;
-
-bool joyLatched = false;
-
-void calibrateJoystick() {
-
-  long sx = 0;
-  long sy = 0;
-
-  for (
-    int i = 0;
-    i < 32;
-    i++
-  ) {
-
-    sx +=
-      analogRead(JOY_X);
-
-    sy +=
-      analogRead(JOY_Y);
-
-    delay(3);
-  }
-
-  joyCenterX =
-    sx / 32;
-
-  joyCenterY =
-    sy / 32;
-  // Do not learn an end-stop as neutral when the stick is held at boot.
-  if (joyCenterX < 900 || joyCenterX > 3195) joyCenterX = 2048;
-  if (joyCenterY < 900 || joyCenterY > 3195) joyCenterY = 2048;
-
-  DAW_LOG.printf(
-    "[JOY] center X=%d Y=%d\n",
-    joyCenterX,
-    joyCenterY
-  );
-}
-
-// ================================================================
-// JOYSTICK AXES
+// LIBRARY NAVIGATION
 // ================================================================
 
 void browseLibrary(int delta) {
@@ -2368,123 +2256,15 @@ void selectLibraryItem() {
   int play=libraryBrowser.enter();int track=libraryBrowser.selectedTrack();
   if (track>=0)selectedTrack=track;
   browserDirty=true;if (playingTrack<0)playerDirty=true;
-  if (play>=0)playSelected();
+  if (play>=0) {
+    if (play == playingTrack) togglePause();
+    else playSelected();
+  }
 }
 void backLibrary() {
   libraryBrowser.back();int track=libraryBrowser.selectedTrack();
   if (track>=0)selectedTrack=track;
   browserDirty=true;if (playingTrack<0)playerDirty=true;
-}
-
-void handleJoystick() {
-  static uint32_t repeatAt = 0;
-  static bool mustRecenter = false;
-  static bool settingsLatched = false, wasInSettings = false;
-  static uint32_t settingsRepeatAt = 0;
-  if (mainSettingsOpen) {
-    wasInSettings = true;
-    int dx = analogRead(JOY_X) - joyCenterX, dy = analogRead(JOY_Y) - joyCenterY;
-    if (abs(dx) < JOY_DEADZONE && abs(dy) < JOY_DEADZONE) { settingsLatched = false; return; }
-    if (max(abs(dx), abs(dy)) < JOY_TRIGGER) return;
-    if (settingsLatched && (int32_t)(millis() - settingsRepeatAt) < 0) return;
-    settingsRepeatAt = millis() + (settingsLatched ? 100 : 350);
-    settingsLatched = true;
-    if (abs(dy) > abs(dx)) {
-      selectedSetting = (selectedSetting + (dy > 0 ? 1 : MAIN_SETTING_COUNT - 1)) % MAIN_SETTING_COUNT;
-    } else {
-      int delta = dx > 0 ? 1 : -1;
-      if (selectedSetting == 3) {
-        oledPage = (oledPage + delta + 3) % 3; visualizerMode = oledPage == 1;
-      } else {
-        portENTER_CRITICAL(&fxMux);
-        int band = selectedSetting;
-        eqDB[band] = (int8_t)constrain((int)eqDB[band] + delta, -12, 12);
-        ++fxRevision;
-        portEXIT_CRITICAL(&fxMux);
-      }
-      if (selectedSetting < 3) { settingsPending = true; settingsChangedAt = millis(); }
-    }
-    mainSettingsDirty = true; return;
-  }
-  settingsLatched = false;
-  if (wasInSettings) { joyLatched = true; mustRecenter = true; wasInSettings = false; }
-
-  static uint32_t last = 0;
-
-  if (
-    millis() -
-    last <
-    25
-  ) {
-
-    return;
-  }
-
-  last =
-    millis();
-
-  if (
-    trackCount == 0
-  ) {
-
-    return;
-  }
-
-  int x =
-    analogRead(
-      JOY_X
-    );
-
-  int y =
-    analogRead(
-      JOY_Y
-    );
-
-  int dx =
-    x -
-    joyCenterX;
-
-  int dy =
-    y -
-    joyCenterY;
-
-  if (
-    abs(dx) <
-    JOY_DEADZONE &&
-    abs(dy) <
-    JOY_DEADZONE
-  ) {
-
-    joyLatched = false; mustRecenter = false; repeatAt = 0;
-
-    return;
-  }
-
-  bool vertical = abs(dy) > abs(dx) && abs(dy) >= JOY_TRIGGER;
-  if (mustRecenter) return;
-  if (joyLatched && (!vertical || (int32_t)(millis() - repeatAt) < 0)) return;
-  bool repeating = joyLatched;
-
-  int largestAxis =
-    abs(dx) >
-    abs(dy)
-      ? abs(dx)
-      : abs(dy);
-
-  if (
-    largestAxis <
-    JOY_TRIGGER
-  ) {
-
-    return;
-  }
-
-  joyLatched = true;
-  repeatAt = millis() + (repeating ? 140 : 450);
-
-  if (vertical) browseLibrary(dy>0 ? 1 : -1);
-  else if (dx<0) backLibrary();
-  else selectLibraryItem();
 }
 
 // ================================================================
@@ -2890,12 +2670,40 @@ void changeFX(int delta) {
 // ENCODER ROTATION
 // ================================================================
 
+void adjustMainSetting(int delta) {
+  if (!delta) return;
+  if (selectedSetting < 3) {
+    portENTER_CRITICAL(&fxMux);
+    eqDB[selectedSetting] = (int8_t)constrain((int)eqDB[selectedSetting] + delta, -12, 12);
+    ++fxRevision;
+    portEXIT_CRITICAL(&fxMux);
+    settingsPending = true; settingsChangedAt = millis();
+  } else if (selectedSetting == 3) {
+    oledPage = ((oledPage + delta) % 3 + 3) % 3;
+    visualizerMode = oledPage == 1;
+  } else {
+    shuffleMode = delta > 0; // clockwise: shuffle; counterclockwise: sequential
+    playerDirty = true;
+  }
+  mainSettingsDirty = true;
+}
+
 void handleEncoders() {
   portENTER_CRITICAL(&encoderMux);
   int e1 = -(encoder1Edges / 4), e2 = encoder2Edges / 4;
   encoder1Edges %= 4; encoder2Edges %= 4;
   portEXIT_CRITICAL(&encoderMux);
-  if (e2 && !mainSettingsOpen && trackCount) {
+  if (mainSettingsOpen) {
+    if (e2) {
+      if (settingEditing) adjustMainSetting(e2);
+      else {
+        selectedSetting = ((selectedSetting + e2) % MAIN_SETTING_COUNT + MAIN_SETTING_COUNT) % MAIN_SETTING_COUNT;
+        mainSettingsDirty = true;
+      }
+    }
+    return;
+  }
+  if (e2 && trackCount) {
     browseLibrary(e2);
   }
   if (!e1 || mainSettingsOpen || oledPage != 0) return;
@@ -2914,12 +2722,20 @@ void handleEncoders() {
 
 void handleButtons() {
   uint32_t now = millis();
-  ButtonEvent b1 = enc1Button.update(now), b2 = enc2Button.update(now), joy = joyButton.update(now);
+  ButtonEvent b1 = enc1Button.update(now), b2 = enc2Button.update(now);
   if (!mainSettingsOpen && b1 == CLICK_EVENT) {
     changeFX(1); oledPage = 0; visualizerMode = false;
   }
-  if (b2 == LONG_EVENT) { shuffleMode = !shuffleMode; playerDirty = true; }
-  if (!mainSettingsOpen && b2 == CLICK_EVENT) selectLibraryItem();
+  if (b2 == LONG_EVENT) toggleMainSettings();
+  else if (b2 == DOUBLE_CLICK_EVENT) {
+    if (mainSettingsOpen) {
+      if (settingEditing) { settingEditing = false; mainSettingsDirty = true; }
+      else toggleMainSettings();
+    } else backLibrary();
+  } else if (b2 == CLICK_EVENT) {
+    if (mainSettingsOpen) { settingEditing = !settingEditing; mainSettingsDirty = true; }
+    else selectLibraryItem();
+  }
   if (!mainSettingsOpen && b1 == LONG_EVENT) {
     portENTER_CRITICAL(&fxMux);
     uint16_t bit = 1U << fxMode;
@@ -2931,11 +2747,7 @@ void handleButtons() {
     if (fxMode == FX_SLOW) { rateChangePending = true; rateChangedAt = now; }
     settingsPending = true; settingsChangedAt = now; fxChanged();
   }
-  if (joy == LONG_EVENT) toggleMainSettings();
-  if (joy == CLICK_EVENT) {
-    if (mainSettingsOpen) toggleMainSettings();
-    else togglePause();
-  }
+
 }
 
 // ================================================================
@@ -3076,7 +2888,7 @@ void renderOLED() {
       int h = constrain((int)spectrumBars[i], 0, 100) * 40 / 100;
       if (h) oled.drawBox(i * 16 + 2, 53 - h, 11, h);
     }
-    oled.drawStr(0, 63, "JOY SETTINGS: FX PAGE");
+    oled.drawStr(0, 63, "E2 HOLD: SETTINGS");
   } else {
     oled.setCursor(0, 8); oled.print(fxNames[fxMode]);
     oled.setCursor(105, 8); oled.print((enabledFXMask & (1U << fxMode)) ? "ON" : "OFF");
@@ -3087,7 +2899,7 @@ void renderOLED() {
     oled.setCursor(0, 49);
     if (fxMode == FX_SLOW) oled.printf("SPEED %d%%", 100 - (int)fxMix * 2);
     else oled.printf("CHAIN %d/3  E1 HOLD ON", activeAudioEffects(enabledFXMask));
-    oled.setCursor(0, 63); oled.print((int32_t)(stackLimitUntil - millis()) > 0 ? "LIMIT: 3 AUDIO FX" : "E1 NEXT / E2 SHUFFLE");
+    oled.setCursor(0, 63); oled.print((int32_t)(stackLimitUntil - millis()) > 0 ? "LIMIT: 3 AUDIO FX" : "E1 NEXT / E2 SETTINGS");
   }
   oled.sendBuffer();
 }
@@ -3316,7 +3128,7 @@ void drawVolume() {
   if (width) tft.fillRoundRect(18, 292, width, 6, 3, C_CYAN);
   tft.setTextColor(C_MUTED);
   tft.setCursor(18, 307);
-  tft.print("HOLD JOY: SETTINGS");
+  tft.print("E2: 2X BACK / HOLD SET");
 }
 
 // ================================================================
@@ -3324,34 +3136,43 @@ void drawVolume() {
 // ================================================================
 
 void drawMainSettings() {
-  static int lastSelected = -1, lastValues[MAIN_SETTING_COUNT] = {-100,-100,-100,-100};
+  static int lastSelected = -1, lastValues[MAIN_SETTING_COUNT] = {-100,-100,-100,-100,-100};
+  static bool lastEditing = false;
   bool full = mainSettingsLayoutDirty;
   if (full) {
     tft.setTextSize(1); tft.setTextColor(C_MUTED);
-    tft.setCursor(14, 40); tft.print("EQ / OLED VIEW");
-    tft.setCursor(14, 267); tft.print(DAW_SERIAL_DIAGNOSTICS ? "V6 R3 20261014 LOG:ON" : "V6 R3 20261014 LOG:OFF");
-    tft.setCursor(14, 282); tft.print("JOY UP/DOWN: SELECT");
-    tft.setCursor(14, 298); tft.print("L/R ADJUST  CLICK BACK");
+    tft.setCursor(14, 40); tft.print("EQ / OLED / PLAY ORDER");
+    tft.setCursor(14, 276); tft.print(DAW_SERIAL_DIAGNOSTICS ? "V6 R4 20261019 LOG:ON" : "V6 R4 20261019 LOG:OFF");
+    tft.setCursor(14, 298); tft.print("2X: BACK  HOLD: EXIT");
   }
-  const char *labels[MAIN_SETTING_COUNT] = {"BASS", "MID", "TREBLE", "OLED VIEW"};
+  if (full || lastEditing != settingEditing) {
+    tft.fillRect(10, 280, 220, 12, C_BG);
+    tft.setTextSize(1); tft.setTextColor(C_MUTED);
+    tft.setCursor(14, 282);
+    tft.print(settingEditing ? "ROTATE: EDIT CLICK: DONE" : "ROTATE: ROW CLICK: EDIT");
+  }
+  const char *labels[MAIN_SETTING_COUNT] = {"BASS", "MID", "TREBLE", "OLED VIEW", "PLAY ORDER"};
   for (int row = 0; row < MAIN_SETTING_COUNT; ++row) {
-    int raw = row == 3 ? oledPage : eqDB[row];
+    int raw = row < 3 ? eqDB[row] : row == 3 ? oledPage : (int)shuffleMode;
     bool selectionChanged = selectedSetting != lastSelected && (row == selectedSetting || row == lastSelected);
-    if (!full && !selectionChanged && lastValues[row] == raw) continue;
+    bool editingChanged = lastEditing != settingEditing && row == selectedSetting;
+    if (!full && !selectionChanged && !editingChanged && lastValues[row] == raw) continue;
     lastValues[row] = raw;
-    int y = 59 + row * 53;
-    tft.fillRoundRect(10, y, 220, 45, 7, row == selectedSetting ? C_TRACK : C_CARD);
-    tft.drawRoundRect(10, y, 220, 45, 7, row == selectedSetting ? C_CYAN : C_BORDER);
-    tft.setTextSize(1); tft.setTextColor(row == selectedSetting ? C_CYAN : C_MUTED);
-    tft.setCursor(20, y + 8); tft.print(labels[row]);
-    tft.setTextColor(C_WHITE); tft.setCursor(20, y + 22);
+    int y = 55 + row * 43;
+    uint16_t accent = settingEditing ? C_YELLOW : C_CYAN;
+    tft.fillRoundRect(10, y, 220, 39, 7, row == selectedSetting ? C_TRACK : C_CARD);
+    tft.drawRoundRect(10, y, 220, 39, 7, row == selectedSetting ? accent : C_BORDER);
+    tft.setTextSize(1); tft.setTextColor(row == selectedSetting ? accent : C_MUTED);
+    tft.setCursor(20, y + 5); tft.print(labels[row]);
+    tft.setTextColor(C_WHITE); tft.setCursor(20, y + 19);
     if (row == 3) { tft.print(oledPage == 2 ? "LYRICS" : oledPage == 1 ? "SPECTRUM" : "FX"); continue; }
+    if (row == 4) { tft.print(shuffleMode ? "SHUFFLE" : "SEQUENTIAL"); continue; }
     tft.setTextSize(2); tft.printf("%+d dB", (int)eqDB[row]);
     tft.fillRoundRect(123, y + 25, 94, 5, 2, C_BORDER);
     int width = (eqDB[row] + 12) * 94 / 24;
     if (width) tft.fillRoundRect(123, y + 25, width, 5, 2, C_CYAN);
   }
-  lastSelected = selectedSetting; mainSettingsLayoutDirty = false;
+  lastSelected = selectedSetting; lastEditing = settingEditing; mainSettingsLayoutDirty = false;
 }
 
 void renderTFT() {
@@ -3496,10 +3317,6 @@ void setup() {
   enc1Button.begin();
 
   enc2Button.begin();
-
-  joyButton.begin();
-
-  calibrateJoystick();
 
   // --------------------------------------------------------------
   // OLED
@@ -4015,37 +3832,11 @@ void setup() {
     "[SYSTEM] READY"
   );
 
-  DAW_LOG.println(
-    "[SYSTEM] JOY PRESS = PLAY/PAUSE"
-  );
-
-  DAW_LOG.println(
-    "[SYSTEM] ENC2 CLICK = ENTER FOLDER / PLAY SONG"
-  );
-
-  DAW_LOG.println(
-    "[SYSTEM] JOY UP/DOWN = BROWSE CURRENT LEVEL"
-  );
-
-  DAW_LOG.println(
-    "[SYSTEM] JOY RIGHT = ENTER / PLAY SELECTED"
-  );
-
-  DAW_LOG.println(
-    "[SYSTEM] JOY LEFT = BACK ONE LIBRARY LEVEL"
-  );
-
-  DAW_LOG.println(
-    "[SYSTEM] E1 CLICK NEXT FX / E1 HOLD STAGE ON-OFF / E2 HOLD SHUFFLE / JOY SETTINGS"
-  );
-
-  DAW_LOG.println(
-    "[SYSTEM] ENC1 LONG = SELECTED FX ON/OFF"
-  );
-
-  DAW_LOG.println(
-    "[SYSTEM] ENC2 LONG = SHUFFLE / SEQUENTIAL"
-  );
+  DAW_LOG.println("[SYSTEM] ENC2 ROTATE = BROWSE / SETTINGS SELECT-EDIT");
+  DAW_LOG.println("[SYSTEM] ENC2 CLICK = ENTER / PLAY; CURRENT SONG = PAUSE-RESUME");
+  DAW_LOG.println("[SYSTEM] ENC2 DOUBLE = BACK; ENC2 HOLD = SETTINGS");
+  DAW_LOG.println("[SYSTEM] SETTINGS: CLICK TO EDIT/DONE; PLAY ORDER CONTROLS SHUFFLE");
+  DAW_LOG.println("[SYSTEM] ENC1 CLICK = NEXT FX; ENC1 HOLD = SELECTED FX ON/OFF");
 }
 
 // ================================================================
@@ -4136,8 +3927,8 @@ void reportRuntimeHealth() {
     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
     audioTaskHandle ? (unsigned)uxTaskGetStackHighWaterMark(audioTaskHandle) : 0,
     playingTrack, (int)playState);
-  DAW_LOG.printf("[JOY] raw=%d,%d center=%d,%d selected=%d settings=%d\n",
-    analogRead(JOY_X), analogRead(JOY_Y), joyCenterX, joyCenterY, selectedTrack, mainSettingsOpen);
+  DAW_LOG.printf("[UI] selected=%d settings=%d editing=%d shuffle=%d\n",
+    selectedTrack, mainSettingsOpen, settingEditing, shuffleMode);
 }
 
 void reportAudioFormat() {
@@ -4155,7 +3946,7 @@ void reportAudioFormat() {
 
 void loop() {
   // Sample input before diagnostic, display and metadata work.
-  handleEncoders(); handleButtons(); handleJoystick(); updateFader();
+  handleButtons(); handleEncoders(); updateFader();
   reportAudioFormat();
   if (advancePending) {
     advancePending = false;

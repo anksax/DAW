@@ -4,7 +4,7 @@
 
 The user still reports this after disabling firmware and AudioTools serial diagnostics. The logging mitigation has not fixed the observed event. Do not assume a USB reset or firmware underrun without evidence.
 
-1. Verify upload completed successfully and settings show V6 20261013 LOG:OFF. Sketch/headers compile into one firmware image, not separate ESP32 files. A failed compile/upload can leave an old build running. DAW_SERIAL_DIAGNOSTICS defaults to 0 in SerialDiagnostics.h.
+1. Verify upload completed successfully and settings show V6 R4 20261019 LOG:OFF. Sketch/headers compile into one firmware image, not separate ESP32 files. A failed compile/upload can leave an old build running. DAW_SERIAL_DIAGNOSTICS defaults to 0 in SerialDiagnostics.h.
 2. Play the same file with FX disabled, then compare monitor-close behavior with standalone power from a USB wall charger.
 3. Note whether the UI shows the boot screen/stops playback or remains responsive while audio corrupts.
 4. Record which USB socket is used (native USB versus USB-to-UART), and the power/DAC ground arrangement.
@@ -14,9 +14,11 @@ The user still reports this after disabling firmware and AudioTools serial diagn
 
 Keep FlacTags.h, SerialDiagnostics.h and TFTCanvas.h beside the V6 .ino. Extract the ZIP before opening. For “bootloader.bin was unexpected at this time”, try C:\Arduino\DJ_Audio_Console_V6 and collect verbose compile output if it persists. AudioTools headers must precede the first function so Arduino-generated prototypes can see AudioInfo. The unsigned ramp arithmetic avoids max() deduction conflicts on ESP32. “Multiple libraries found for SD.h” is informational if the ESP32 core SD library is selected.
 
-## Brightness and joystick
+## Encoder navigation and Settings
 
-Use joystick hold to open settings, up/down to select a row and left/right to adjust; return to neutral after each step. Keep the stick neutral at startup. Enable diagnostics for [JOY] raw/center values and [BACKLIGHT] attach/write status. Brightness controls PWM on GPIO 21 and OLED contrast; physical TFT BL wiring is required.
+There is no joystick in the current build. E2 rotates to browse, clicks to enter/play, double-clicks to go back and holds for Settings. Single-click waits for the 300 ms double-click window; hold fires after about 650 ms. Selecting the playing song pauses/resumes it. In Settings, click a row to edit, rotate to adjust and click to finish. Double-click first leaves edit mode, then closes Settings. Hold always closes Settings.
+
+Shuffle is under PLAY ORDER. OLED VIEW selects FX, SPECTRUM or LYRICS. Those two settings are session-only; FX strengths/enables and EQ save while paused/stopped after changes settle for 1.5 seconds. Brightness adjustment is removed; BL is held HIGH and OLED contrast is fixed full. Optional UI logs use [UI], with no joystick calibration.
 
 ## Speed and FX
 
@@ -201,7 +203,7 @@ Include:
 
 ## TFT sluggish only while playing / randomly blank with backlight lit
 
-The 13 October build draws in a PSRAM canvas and queues short SPI stripes, using the driver SPI transaction lock instead of waiting behind the whole audio copy. It samples controls before drawing and delays new metadata reads until pause/stop. Encoder 2 rotation can browse; held joystick up/down repeats. Check settings for V6 20261013 LOG:OFF and confirm OPI PSRAM is enabled. A failed canvas allocation reports TFT BUFFER FAILED / CHECK OPI PSRAM on OLED.
+The 13 October build draws in a PSRAM canvas and queues short SPI stripes, using the driver SPI transaction lock instead of waiting behind the whole audio copy. It samples controls before drawing and delays new metadata reads until pause/stop. Encoder 2 rotation browses; double-click returns to the parent folder and hold opens Settings. Check settings for V6 R4 20261019 LOG:OFF and confirm OPI PSRAM is enabled. A failed canvas allocation reports TFT BUFFER FAILED / CHECK OPI PSRAM on OLED.
 
 A retained-content repaint occurs every five seconds. If the panel remains blank while the OLED/transport respond, collect the physical TFT CS/DC/RST and power wiring details. No display readback is available to prove whether the controller reset or slept; neither backlight being on nor successful compilation proves the panel's data connection. Do not erase flash/NVS as a first response to this symptom.
 
@@ -210,10 +212,10 @@ A retained-content repaint occurs every five seconds. If the panel remains blank
 
 Brightness adjustment is removed; the backlight has a fixed full output. Old bright preferences are ignored.
 
-For loss of clarity, compare FX disabled and bass/mid/treble 0 dB at the same volume. Positive EQ boosts now apply compensating preamp attenuation, which may lower loudness. This is distinct from intentional fuzz/distortion/bitcrusher. Check whether the output feeds a headphone amplifier or drives headphones directly; PCM5102A line output is specified for >=1 kOhm loads, not typical low-impedance earphones. Reducing digital gain cannot establish or fix an analog load/power fault.
+For loss of clarity, compare FX disabled and bass/mid/treble 0 dB at the same volume. Positive EQ boosts now apply compensating preamp attenuation, which may lower loudness. This is distinct from intentional fuzz/distortion/bitcrusher. Check whether the actual CJM1334 output feeds an amplifier or drives headphones directly; verify its intended output load against the particular breakout documentation. Reducing digital gain cannot establish or fix an analog load/power fault.
 
-Final E2 controls are rotation browsing, click highlighted-track playback and hold shuffle. OLED FX/spectrum is a settings row. Reverb is a selectable FX with saved strength; pause and wait two seconds before power-off to save edits. ALBUM appears from tags or the parent folder, including before metadata loads.
+Current E2 controls are rotation browsing, click enter/play (current song pauses/resumes), double-click back and hold Settings. Shuffle is under PLAY ORDER; OLED FX/spectrum/lyrics is under OLED VIEW. Reverb is a selectable FX with saved strength; pause and wait two seconds before power-off to save edits. ALBUM appears from tags or the parent folder, including before metadata loads.
 
-The latest build label is V6 R2 20261013 LOG:OFF. Use R2 controls and EQ/OLED settings rather than earlier brightness instructions above.
+The latest build label is V6 R4 20261019 LOG:OFF. Follow the encoder-only controls above.
 
-R3 uses artist/album/song folder navigation. Right/E2 click enters, left backs up. For lyrics, match the .lrc basename and select LYRICS under OLED VIEW. Artwork is optional baseline JPEG (folder or FLAC embedded); missing/unsupported art has no placeholder. Keep all bundled C/header files and see LYRICS_AND_ALBUMS.md for limits. Latest label: V6 R3 20261014 LOG:OFF.
+R3 uses artist/album/song folder navigation. E2 click enters; E2 double-click backs up. For lyrics, match the .lrc basename and select LYRICS under OLED VIEW. Artwork is optional baseline JPEG (folder or FLAC embedded); missing/unsupported art has no placeholder. Keep all bundled C/header files and see LYRICS_AND_ALBUMS.md for limits. Latest label: V6 R4 20261019 LOG:OFF.
