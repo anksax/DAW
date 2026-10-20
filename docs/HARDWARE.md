@@ -1,6 +1,6 @@
 # Hardware, BOM and Wiring
 
-This document describes the current hardware target for the ESP32-S3 DJ Audio Console.
+This document describes the current **THE DAW** prototype, updated 19 October 2026. The active sketch uses two encoders and a fader; the joystick is removed.
 
 ## Core controller
 
@@ -23,11 +23,10 @@ The current firmware uses:
 |---|---:|---|
 | ESP32-S3-WROOM-1 N16R8 DevKit | 1 | Main MCU |
 | ST7789 240x320 TFT | 1 | Main UI |
-| SH1106 128x64 I2C OLED | 1 | FX / spectrum UI |
-| microSD module or socket | 1 | Audio storage |
-| UDA1334A / CJMCU I2S DAC | 1 | Audio DAC |
+| SH1106 128x64 I2C OLED (current driver) | 1 | FX / spectrum / lyrics |
+| ESP board's onboard microSD reader | 1 | Audio storage; TFT SD slot unused |
+| CJM1334 / UDA1334A I2S DAC | 1 | Audio DAC |
 | KY-040 style rotary encoders | 2 | Effect and playback controls |
-| Analog joystick module | 1 | Track selection / navigation |
 | 10 kΩ linear slide potentiometer | 1 | Master volume |
 | 3.5 mm audio jack | 1 | Analog audio output |
 | Optional headphone amplifier | 1 | Higher headphone drive |
@@ -56,10 +55,13 @@ The current firmware uses:
 | Encoder 2 | CLK | 39 |
 | Encoder 2 | DT | 40 |
 | Encoder 2 | SW | 47 |
-| Joystick | X | 1 |
-| Joystick | Y | 2 |
-| Joystick | SW | 18 |
 | Volume fader | analog | 7 |
+
+GPIOs **1, 2 and 18** are freed from joystick use. These are firmware GPIO assignments, not verified breadboard-hole coordinates.
+
+## Onboard SD reader
+
+The owner uses the ESP board's onboard reader. No separate SD module is needed, and the TFT's SD socket/pads are unused. The sketch configures SPI SD on CS=10, MOSI=11, SCK=12, MISO=13. Confirm those signals against the exact board schematic/pinout before reproducing this on another board; the reader's fixed wiring has not been independently established. Do not assume every N16R8 board includes the same reader.
 
 ## Shared SPI bus
 
@@ -115,13 +117,7 @@ Click selects FX, rotation changes strength (0–25), hold toggles the selected 
 - DT: GPIO 40
 - switch: GPIO 47
 
-Click enters the highlighted folder or plays the highlighted song; hold toggles shuffle; rotation browses the current artist/album/song level. OLED view is selected in main settings.
-
-### Joystick
-- X: GPIO 1
-- Y: GPIO 2
-
-The firmware calibrates the joystick center during startup.
+Rotate to browse the current artist/album/song level. Click enters a folder or plays a song; selecting the playing song pauses/resumes it. Double-click returns one level. Hold opens/closes Settings. In Settings, rotate to select a row, click to edit, rotate to adjust and click to finish. Shuffle is under PLAY ORDER; OLED VIEW selects FX/spectrum/lyrics.
 
 ### Linear fader
 - analog: GPIO 7
@@ -130,7 +126,13 @@ The software mapping is intentionally reversed:
 - low ADC -> high volume
 - high ADC -> low volume
 
+## Physical arrangement
+
+The prototype uses two breadboards side by side, with the ESP bridging their inner terminal strips so every header pin remains accessible. In the agreed landscape orientation USB is to the right and the antenna to the left; occupied positions were reported as 22–43. The TFT, OLED and CJM1334 must also fit on those two boards; only encoders/fader remain outside. Exact hole-to-GPIO positions depend on the printed labels and are not established by the earlier provisional diagrams.
+
 ## Power and grounding
+
+The owner supplies the TFT VCC from **5 V**. GPIO signals remain **3.3 V logic**. Keep the 5 V and 3.3 V rails separate, join grounds, and verify each breakout's supply markings. CJM1334 supply/regulator pins must follow the actual module; do not reuse PCM5102A wiring or assume an SCLK-to-ground connection.
 
 For reliable audio:
 - use a common ground between ESP32, DAC, displays and controls
@@ -148,7 +150,7 @@ For reliable audio:
 | CPU Frequency | 240 MHz (WiFi) |
 | Flash Mode | QIO 80 MHz |
 | Flash Size | 16 MB |
-| Partition Scheme | Huge APP (3 MB No OTA / 1 MB SPIFFS) |
+| Partition Scheme | 16M Flash (3MB APP/9.9MB FATFS), as saved in board-fqbn.txt |
 | PSRAM | OPI PSRAM |
 | USB CDC On Boot | Enabled |
 | Upload Mode | UART0 / Hardware CDC |
@@ -169,7 +171,7 @@ Before debugging software, verify:
 - [ ] TFT renders correctly
 - [ ] OLED renders correctly
 - [ ] both encoders register rotation and click
-- [ ] joystick center is stable
+- [ ] E2 double-click goes back without playing/entering; hold opens Settings
 - [ ] fader spans most of the ADC range
 - [ ] I2S DAC produces clean audio with FX bypassed
 - [ ] all modules share ground
@@ -180,12 +182,8 @@ Before debugging software, verify:
 The present hardware is intentionally a single-deck embedded audio workstation. Multi-deck audio, recording inputs, MIDI hardware, balanced outputs and custom PCB integration are future expansion areas.
 
 
-V6 main-screen settings use joystick hold to enter/exit and joystick axes to select/adjust bass/mid/treble EQ and OLED view. Joystick click exits settings or plays/pauses outside settings. TFT BL GPIO 21 is held HIGH; OLED contrast is fixed at 255. Brightness adjustment is removed. See the README for the complete mapping and NVS save behavior.
+## Memory and display notes
 
+The TFT canvas needs 153,600 bytes of OPI PSRAM. TFT SPI runs at 16 MHz with eight rows per transaction. Keep CS/DC/RST and power connections secure; periodic repaint cannot correct a power/wiring fault. Reverb reserves about 51.75 KiB additional internal RAM across prototype/stereo clones. Check maximum-stack playback on the actual board.
 
-The TFT update revision requires 153,600 bytes of OPI PSRAM for its screen canvas. It lowers TFT SPI to 16 MHz and sends eight rows per transaction on the shared FSPI bus. Keep CS/DC/RST and power wiring short and secure; periodic redraw cannot correct loss of power, wiring faults or a controller stuck asleep.
-
-
-R2 reverb reserves about 51.75 KiB additional internal RAM across prototype and stereo clones. OPI PSRAM still holds the TFT canvas. Brightness adjustment is removed; TFT BL is held HIGH and OLED contrast fixed at 255. PCM5102A modules provide line output; TI specifies minimum 1 kOhm load per output. A headphone amplifier is needed for lower-impedance headphones. https://www.ti.com/lit/ds/symlink/pcm5102a.pdf
-
-Current R3 control mapping: E2 rotate browses the current level, click enters a folder or plays the highlighted song, hold toggles shuffle. Joystick left returns to the parent level and right enters/selects. OLED view is selected in main settings.
+The sketch instantiates `U8G2_SH1106_128X64_NONAME_F_HW_I2C`; earlier SSD1306 descriptions should not be used to select a driver without identifying the actual OLED. TFT BL GPIO 21 is held HIGH and OLED contrast is 255. Brightness adjustment is removed. FX/EQ save behavior and the full controls are in the [README](../README.md).

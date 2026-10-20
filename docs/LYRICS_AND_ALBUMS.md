@@ -16,18 +16,18 @@ Only FLAC tracks become selectable songs. Recursive scanning sorts canonical pat
 
 | Control | Library action |
 |---|---|
-| Joystick up/down or E2 rotation | Browse the current artist/album/song level |
-| Joystick right or E2 click | Enter highlighted folder; play highlighted song at SONGS |
-| Joystick left | Return SONGS → ALBUMS → ALBUM ARTISTS |
-| E2 hold | Toggle shuffle |
-| Joystick click | Transport play/pause; when stopped, start the selected/representative song |
-| Joystick hold | Open/close EQ/OLED settings |
+| E2 rotation | Browse the current artist/album/song level |
+| E2 click | Enter folder / play song; selecting the playing song pauses/resumes |
+| E2 double-click | Return SONGS → ALBUMS → ALBUM ARTISTS |
+| E2 hold | Open/close Settings |
+| E2 in Settings | Rotate selects a row; click toggles editing; rotate edits |
+| Settings → PLAY ORDER | Clockwise selects shuffle; counterclockwise selects sequential |
 
 Folder selection stays put when EOF advances playback; the playing card and lyrics still follow the actual playing track. SONGS has a cyan album heading/rule, and ALBUMS separates rows with horizontal lines. The playing card gives album names a large cyan line; long names scroll after a short initial pause. Cover art reduces the text field only when an image is successfully decoded.
 
 ## Lyrics
 
-Put a UTF-8 `.lrc` beside each `.flac`, with exactly the same basename. `.LRC` is also checked. Select **OLED VIEW → LYRICS** in main settings; left/right cycles FX, SPECTRUM and LYRICS. Encoder 2 hold remains shuffle. E1 click returns to the FX page while selecting the next FX.
+Put a UTF-8 `.lrc` beside each `.flac`, with exactly the same basename. `.LRC` is also checked. Hold E2 for Settings, rotate to **OLED VIEW**, click to edit, rotate to **LYRICS**, then click to finish and hold to exit. OLED VIEW cycles FX, SPECTRUM and LYRICS. E1 click returns to the FX page while selecting the next FX.
 
 Example (original placeholder text):
 
